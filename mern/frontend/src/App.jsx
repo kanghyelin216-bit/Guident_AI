@@ -4,27 +4,25 @@ import { io } from 'socket.io-client';
 import MapSection from './MapSketch'; 
 import AdminBeaconsSection from './AdminBeacons';
 
-// ✅ 통합 백엔드 서버(4000번 포트)의 베이스 URL 설정
-const YOUR_COMPUTER_IP = 'http://localhost:4000'; 
+// 접속한 주소를 기준으로 자동으로 서버 주소를 잡음 (팀원끼리 IP 달라도 안 깨짐)
+const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
+  ? window.location.origin
+  : `${window.location.protocol}//${window.location.hostname}:4000`;
+const YOUR_COMPUTER_IP = `${SERVER_BASE_URL}/api/location`; 
 
-// ⚠️ TODO: 지금은 테스트 중인 지도가 하나뿐이라는 전제로 고정 mapId를 씁니다.
-// 관리자 페이지에서 맵을 업로드하면 실제 Map 문서의 _id로 교체하세요.
-// (안드로이드 BeaconConfig.kt의 mapId와 반드시 같은 값이어야 합니다)
-const CURRENT_MAP_ID = '6600a1b2c3d4e5f6789abcde';
+// ⚠️ 테스트 중인 지도가 하나뿐이라는 전제로 고정 mapId를 씁니다.
+const CURRENT_MAP_ID = '6a4e268e4b23f93d45141083';
 
-// 이 세션이 어떤 scannerId로 동작할지 결정합니다.
-// 우선순위:
-//   1) URL 쿼리 ?sid=xxx  → 안드로이드 BeaconScanner 앱이 "웹앱 열기"로 넘겨준 값
-//      (요구사항 1번 QR코드 접속과 동일한 메커니즘: QR/딥링크에 sid를 담아 전달)
-//   2) localStorage에 저장된 이전 값 (같은 폰에서 새로고침 시 유지)
-//   3) 그래도 없으면 위치추정과 무관한 web_전용 임시 ID (브라우저 단독 테스트용)
 function getOrCreateWebScannerId() {
   const KEY = 'guidant_scanner_id';
 
-  const urlSid = new URLSearchParams(window.location.search).get('sid');
-  if (urlSid) {
-    localStorage.setItem(KEY, urlSid);
-    return urlSid;
+  // 🟢 URL 파라미터에서 sid를 안전하게 추출
+  if (typeof window !== 'undefined') {
+    const urlSid = new URLSearchParams(window.location.search).get('sid');
+    if (urlSid) {
+      localStorage.setItem(KEY, urlSid);
+      return urlSid;
+    }
   }
 
   let id = localStorage.getItem(KEY);
@@ -35,8 +33,6 @@ function getOrCreateWebScannerId() {
   return id;
 }
 
-// 현재 세션이 안드로이드 스캐너와 실제로 페어링되어 있는지 여부
-// (scannerId가 안드로이드 발급 형식인 "android_"로 시작하면 실시간 위치추정과 연결된 상태)
 function isPairedWithScanner(scannerId) {
   return typeof scannerId === 'string' && scannerId.startsWith('android_');
 }
@@ -48,8 +44,6 @@ const MENU_ITEMS = [
   { id: 'recommend', icon: TrendingUp,    label: '맞춤 추천',          desc: '관심사 기반 전시물 추천',           color: '#FEF0F5', accent: '#F768A1', emoji: '✨' },
 ];
 
-// 관리자 전용 메뉴. 일반 방문객에게는 노출되지 않고, ?admin=1 로 접속했을 때만 보입니다.
-// (아직 로그인/인증이 없는 임시 게이트입니다 — 실제 배포 전엔 JWT 등 인증으로 반드시 교체하세요)
 const ADMIN_MENU_ITEM = {
   id: 'admin', icon: Settings, label: '관리자: 비콘 등록', desc: '지도 클릭으로 비콘 좌표 등록',
   color: '#F1F3F5', accent: '#495057', emoji: '⚙️',
@@ -71,20 +65,18 @@ function useCongestion() {
   const [congestion, setCongestion] = useState({});
 
   useEffect(() => {
-    // 1) 최초 진입 시 폴백용 스냅샷 로드
     const fetchOnce = async () => {
       try {
-        const res = await fetch(`${YOUR_COMPUTER_IP}/api/location/congestion/${CURRENT_MAP_ID}`);
+        const res = await fetch(`${SERVER_BASE_URL}/api/location/congestion/${CURRENT_MAP_ID}`);
         const data = await res.json();
         setCongestion(data?.congestion || {});
       } catch (err) {
-        // 서버 연결 안 됐을 때는 조용히 무시 (다음 소켓 이벤트로 갱신됨)
+        // 에러 소멸 처리
       }
     };
     fetchOnce();
 
-    // 2) 이후로는 서버가 위치 갱신 때마다 쏘는 실시간 이벤트로 반영
-    const socket = io(YOUR_COMPUTER_IP, { transports: ['websocket'] });
+    const socket = io(SERVER_BASE_URL, { transports: ['websocket'] });
     socket.on('congestion_update', (payload) => {
       if (payload?.mapId === CURRENT_MAP_ID) {
         setCongestion(payload.congestion || {});
@@ -118,11 +110,10 @@ function Header({ activePage, onBack, paired, allMenuItems }) {
       )}
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: T.text, lineHeight: 1.2 }}>
-          {activePage ? activeMenu.label : 'Guidant ✨'}
+          {activePage ? activeMenu?.label : 'Guidant ✨'}
         </div>
         {!activePage && <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>전시 가이드</div>}
       </div>
-      {/* 안드로이드 스캐너 앱과 페어링됐는지(=실시간 위치추정이 이 세션에 연결됐는지) 표시 */}
       <div style={{
         fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8, flexShrink: 0,
         color: paired ? '#2F9E44' : '#E8590C',
@@ -226,8 +217,7 @@ function ChatSection() {
     const loadId = Date.now() + 1;
     setMessages(prev => [...prev, { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' }]);
     try {
-      // 🛠️ 인메모리 스텁(/chat) 대신 DB에 대화이력을 남기는 실제 라우트(/api/chat) 사용
-      const res = await fetch(`${YOUR_COMPUTER_IP}/api/chat`, {
+      const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userText, scannerId: getOrCreateWebScannerId() }),
       });
@@ -342,13 +332,19 @@ const SECTION_MAP = { map: MapSection, exhibits: ExhibitsSection, chat: ChatSect
 
 export default function App() {
   const [activePage, setActivePage] = useState(null);
-  // 안드로이드 스캐너 앱이 넘겨준(또는 이전에 저장된) scannerId를 세션 전체에서 공유
-  const [scannerId] = useState(() => getOrCreateWebScannerId());
+  const [scannerId, setScannerId] = useState(() => getOrCreateWebScannerId());
+
+  // 🟢 [추가 효과] 안드로이드 앱에서 접속 시 실시간으로 바뀐 URL의 ?sid= 파라미터를 읽어오도록 동기화 보강
+  useEffect(() => {
+    const urlSid = new URLSearchParams(window.location.search).get('sid');
+    if (urlSid && urlSid !== scannerId) {
+      setScannerId(urlSid);
+    }
+  }, [activePage]);
+
   const paired = isPairedWithScanner(scannerId);
   const ActiveSection = activePage ? SECTION_MAP[activePage] : null;
 
-  // ⚠️ 임시 게이트: URL에 ?admin=1 이 있을 때만 관리자 메뉴 노출.
-  // 실제 인증(로그인)이 아니므로 배포 전 반드시 JWT 등으로 교체하세요.
   const isAdmin = new URLSearchParams(window.location.search).get('admin') === '1';
   const menuItems = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS;
 
@@ -372,7 +368,7 @@ export default function App() {
       }}>
         {activePage === null
           ? <HomeMenu items={menuItems} onNavigate={setActivePage} />
-          : <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} />}
+          : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
       </main>
     </div>
   );

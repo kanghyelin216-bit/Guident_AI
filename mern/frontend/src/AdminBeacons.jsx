@@ -3,16 +3,19 @@
  * 관리자용 비콘 좌표 등록 화면
  *
  * - 지도 이미지를 클릭하면 그 지점의 실제 미터 좌표(x, y)를 자동 계산해 등록 폼에 채웁니다.
- *   (MapSketch.jsx처럼 고정 PIXEL_SCALE을 가정하지 않고, 선택된 Map 문서의 widthM/heightM과
- *    화면에 렌더링된 이미지 크기의 비율로 매번 계산합니다 → 지도가 바뀌어도 항상 정확함)
+ * (MapSketch.jsx처럼 고정 PIXEL_SCALE을 가정하지 않고, 선택된 Map 문서의 widthM/heightM과
+ * 화면에 렌더링된 이미지 크기의 비율로 매번 계산합니다 → 지도가 바뀌어도 항상 정확함)
  * - 백엔드는 이미 완성된 routes/beacons.js(CRUD) + routes/maps.js(맵 업로드)를 그대로 사용합니다.
- *   이 파일은 새 API를 만들지 않고 기존 API를 위한 화면만 붙입니다.
+ * 이 파일은 새 API를 만들지 않고 기존 API를 위한 화면만 붙입니다.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const YOUR_COMPUTER_IP = 'http://localhost:4000';
-// ⚠️ App.jsx의 YOUR_COMPUTER_IP와 동일한 값이어야 합니다.
-// (지금은 파일마다 따로 선언돼 있습니다 — 다음 정리 단계에서 공용 config 모듈로 합치는 걸 권장합니다)
+// 📍 [개선] 하드코딩된 IP를 유연하게 처리: 현재 접속한 도메인 기준 또는 개발용 폴백
+const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production' 
+  ? window.location.origin 
+  : (window.location.port === '5173' || window.location.port === '3000'
+      ? `${window.location.protocol}//${window.location.hostname}:4000` // 백엔드 포트 자동 매핑
+      : 'http://192.168.219.106:4000'); // 기존 명시값 폴백
 
 const T = {
   bg: '#FAFBFF', card: '#FFFFFF', border: '#EEF0F6', radius: '14px',
@@ -124,7 +127,6 @@ export default function AdminBeaconsSection() {
   }, [selectedMapId, loadBeacons, loadSelectedMapDetail]);
 
   // 지도 이미지를 클릭한 지점 → 실제 미터 좌표로 변환
-  // (렌더링된 이미지의 clientWidth/clientHeight 대비 클릭 위치 비율 × 맵의 실제 widthM/heightM)
   const handleMapClick = (e) => {
     if (!selectedMap || !imgRef.current) return;
     const rect = imgRef.current.getBoundingClientRect();
@@ -138,14 +140,14 @@ export default function AdminBeaconsSection() {
 
   const handleRegister = async () => {
     if (!pendingClick) { setError('먼저 지도를 클릭해 위치를 지정하세요.'); return; }
-    if (!formState.beaconId) { setError('beaconId를 입력하세요. (예: UUID-MAJOR-MINOR)'); return; }
+    if (!formState.beaconId) { setError('beaconId를 입력하세요. (예: A1)'); return; }
 
     try {
       const res = await fetch(`${YOUR_COMPUTER_IP}/api/beacons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          beaconId: formState.beaconId,
+          beaconId: formState.beaconId.trim(), // 공백 제거
           x: Number(pendingClick.xM.toFixed(2)),
           y: Number(pendingClick.yM.toFixed(2)),
           txPower: Number(formState.txPower) || -59,
@@ -173,8 +175,6 @@ export default function AdminBeaconsSection() {
     loadBeacons(selectedMapId);
   };
 
-  // 시설(화장실/출구 등) 등록 — PUT /api/maps/:id/facilities 는 배열을 통째로 교체하는 API라서
-  // 기존 목록 + 새 항목을 합쳐서 매번 전체를 다시 보냅니다.
   const handleRegisterFacility = async () => {
     if (!pendingClick) { setError('먼저 지도를 클릭해 위치를 지정하세요.'); return; }
     if (!facilityForm.id || !facilityForm.label) { setError('시설 id와 이름을 입력하세요.'); return; }
@@ -192,7 +192,7 @@ export default function AdminBeaconsSection() {
       const res = await fetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMapId}/facilities`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facilities: nextFacilities }),
+        body: JSON.stringify({ beaconId: formState.beaconId.trim().toUpperCase() }),
       });
       if (!res.ok) throw new Error('시설 등록 실패');
       setFacilityForm({ id: '', label: '', icon: 'toilet' });
@@ -214,7 +214,6 @@ export default function AdminBeaconsSection() {
     loadSelectedMapDetail(selectedMapId);
   };
 
-  // 미터 좌표 → 현재 렌더링된 이미지 위 픽셀 좌표 (마커 표시용)
   const meterToDisplayPx = (xM, yM) => {
     if (!selectedMap || !imgRef.current) return { left: 0, top: 0 };
     const rect = imgRef.current.getBoundingClientRect();
@@ -230,7 +229,6 @@ export default function AdminBeaconsSection() {
 
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720, margin: '0 auto' }}>
-      {/* 탭 전환: 비콘 좌표 등록 / 시설(화장실·출구 등) 등록 */}
       <div style={{ display: 'flex', gap: 6, background: T.inputBg, padding: 4, borderRadius: 12 }}>
         <button
           onClick={() => { setTab('beacon'); setPendingClick(null); setError(''); }}
@@ -252,7 +250,7 @@ export default function AdminBeaconsSection() {
 
       <p style={{ fontSize: 13, color: T.sub, margin: 0 }}>
         {tab === 'beacon'
-          ? '지도를 클릭해서 비콘을 설치한 실제 위치를 찍고, beaconId를 입력해 등록하세요.'
+          ? '지도를 클릭해서 비콘을 설치한 실제 위치를 찍고, 안드로이드 앱과 일치하는 ID(예: A1)를 입력해 등록하세요.'
           : '지도를 클릭해서 화장실·출구 등 안내가 필요한 시설 위치를 등록하세요. 여기서 등록해야 방문객 화면에서 "길안내"가 가능합니다.'}
       </p>
 
@@ -260,7 +258,6 @@ export default function AdminBeaconsSection() {
         <MapUploadForm onUploaded={(doc) => { setMaps([doc]); setSelectedMapId(doc._id); }} />
       ) : (
         <>
-          {/* 맵 선택 */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <label style={{ fontSize: 12, color: T.sub, flexShrink: 0 }}>지도</label>
             <select
@@ -276,7 +273,6 @@ export default function AdminBeaconsSection() {
             </select>
           </div>
 
-          {/* 지도 + 클릭 인터랙션 */}
           {selectedMap && (
             <div
               onClick={handleMapClick}
@@ -293,7 +289,6 @@ export default function AdminBeaconsSection() {
                 draggable={false}
               />
 
-              {/* 등록된 비콘 마커 */}
               {tab === 'beacon' && beacons.map(b => {
                 const { left, top } = meterToDisplayPx(b.x, b.y);
                 return (
@@ -306,7 +301,6 @@ export default function AdminBeaconsSection() {
                 );
               })}
 
-              {/* 등록된 시설 마커 */}
               {tab === 'facility' && (selectedMap.facilities || []).map(f => {
                 const { left, top } = meterToDisplayPx(f.x, f.y);
                 return (
@@ -319,7 +313,6 @@ export default function AdminBeaconsSection() {
                 );
               })}
 
-              {/* 클릭해서 지정 중인 임시 좌표 */}
               {pendingClick && (
                 <div style={{
                   position: 'absolute', left: pendingClick.pxX, top: pendingClick.pxY,
@@ -331,7 +324,6 @@ export default function AdminBeaconsSection() {
             </div>
           )}
 
-          {/* 등록 폼: 비콘 탭 */}
           {tab === 'beacon' && (
           <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadow }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>
@@ -341,9 +333,10 @@ export default function AdminBeaconsSection() {
                 : <span style={{ fontWeight: 400, color: T.sub }}> — 위 지도를 먼저 클릭하세요</span>}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* ⚠️ [원인 B 근본 수정] 안드로이드 기기 하드코딩 식별자와 수동 입력 텍스트 결합 오류 원천 차단 */}
               <input
                 style={inputStyle}
-                placeholder="beaconId (안드로이드 BeaconConfig.kt의 key와 동일하게: UUID-MAJOR-MINOR)"
+                placeholder="비콘 ID 입력 (안드로이드 전송 ID와 동일하게 입력: 예: A1, A2)"
                 value={formState.beaconId}
                 onChange={e => setFormState(s => ({ ...s, beaconId: e.target.value }))}
               />
@@ -354,7 +347,7 @@ export default function AdminBeaconsSection() {
                   onChange={e => setFormState(s => ({ ...s, txPower: e.target.value }))}
                 />
                 <input
-                  style={inputStyle} placeholder="표시 이름 (선택)"
+                  style={inputStyle} placeholder="표시 이름 (예: 중앙 로비 비콘)"
                   value={formState.label}
                   onChange={e => setFormState(s => ({ ...s, label: e.target.value }))}
                 />
@@ -365,7 +358,6 @@ export default function AdminBeaconsSection() {
           </div>
           )}
 
-          {/* 등록된 비콘 목록 */}
           {tab === 'beacon' && (
           <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadow }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>
@@ -402,7 +394,6 @@ export default function AdminBeaconsSection() {
           </div>
           )}
 
-          {/* 등록 폼: 시설 탭 */}
           {tab === 'facility' && (
           <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadow }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>
@@ -414,7 +405,7 @@ export default function AdminBeaconsSection() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
-                  style={inputStyle} placeholder="시설 id (예: toilet_1) — navigation.js의 toFacilityId로 쓰임"
+                  style={inputStyle} placeholder="시설 id (예: toilet_1)"
                   value={facilityForm.id}
                   onChange={e => setFacilityForm(s => ({ ...s, id: e.target.value }))}
                 />
@@ -440,7 +431,6 @@ export default function AdminBeaconsSection() {
           </div>
           )}
 
-          {/* 등록된 시설 목록 */}
           {tab === 'facility' && (
           <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadow }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>

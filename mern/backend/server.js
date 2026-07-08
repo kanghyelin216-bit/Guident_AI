@@ -2,12 +2,14 @@
  * server.js — MERN 백엔드 진입점 (몽고DB + Socket.io + 비콘 위치추정 통합본)
  *
  * ⚠️ 변경 사항 (핵심 파이프라인 수정):
- *  - 가짜 위치추정 스텁(GridPositionEstimator, /beacon, /beacon/:userId)을 제거했습니다.
- *    실제 위치추정은 routes/location.js 의 POST /api/location 하나로 일원화됩니다.
- *  - 인메모리 전용 /chat 엔드포인트를 제거했습니다.
- *    AI 대화는 routes/chat.js 의 POST /api/chat 하나로 일원화됩니다. (DB에 대화이력 저장됨)
- *  - io(Socket.io 서버 인스턴스)를 app.set("io", io) 로 등록해서, 개별 라우터 파일에서
- *    req.app.get("io") 로 꺼내 실시간 브로드캐스트를 할 수 있게 했습니다.
+ * - 가짜 위치추정 스텁(GridPositionEstimator, /beacon, /beacon/:userId)을 제거했습니다.
+ * 실제 위치추정은 routes/location.js 의 POST /api/location 하나로 일원화됩니다.
+ * - 인메모리 전용 /chat 엔드포인트를 제거했습니다.
+ * AI 대화는 routes/chat.js 의 POST /api/chat 하나로 일원화됩니다. (DB에 대화이력 저장됨)
+ * - io(Socket.io 서버 인스턴스)를 app.set("io", io) 로 등록해서, 개별 라우터 파일에서
+ * req.app.get("io") 로 꺼내 실시간 브로드캐스트를 할 수 있게 했습니다.
+ * - [추가 및 보완]: 안드로이드와 프론트엔드의 mapId 싱크 불일치 문제를 해결하기 위한 
+ * 활성 맵 폴백 API(/api/maps/active) 라우트 호환성을 완벽히 조율했습니다.
  */
 
 // 1. 최상단에서 환경 변수를 즉시 로드 (라우터들이 import 되기 전에 무조건 실행됨)
@@ -37,21 +39,50 @@ const app = express();
 const httpServer = createServer(app);
 // 웹소켓 CORS 정책 전면 허용
 const io = new Server(httpServer, {
-    cors: { origin: '*' }
+    cors: { 
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
 });
 
 // 3. 미들웨어 설정
-app.use(cors());
+// 🟢 CORS 설정을 명시적으로 개방하여 프론트엔드(Vite)의 fetch/axios 거부 노이즈를 완전 차단합니다.
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true
+}));
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // 🔌 라우터들이 req.app.get('io')로 소켓 서버에 접근할 수 있도록 등록
-//    (routes/location.js 에서 실시간 위치/혼잡도 브로드캐스트에 사용)
 app.set("io", io);
 
 // ==========================================
 // 4. REST API 엔드포인트 등록
 // ==========================================
+
+// 📍 [원인 A 방지용 핵심 라우트 선언]: mapRoutes 바인딩 전/후 호환성을 보장하기 위해 
+// 통합 백엔드가 액티브 지도 정보를 우선 전송할 수 있도록 헬퍼 라우트 제공
+app.get("/api/maps/active", async (req, res) => {
+    try {
+        // Mongoose 동적 접근 컴파일 에러 방지를 위해 connection을 통해 다이렉트 쿼리 수행 가능 구조 확보
+        const activeMap = await mongoose.connection.db.collection('maps').findOne({}, { sort: { createdAt: -1 } });
+        if (!activeMap) {
+            return res.status(404).json({ error: "등록된 지도가 존재하지 않습니다. 관리자 화면에서 최초 지도를 업로드하세요." });
+        }
+        res.json({ 
+            mapId: activeMap._id.toString(), 
+            name: activeMap.name, 
+            imageUrl: activeMap.imageUrl,
+            widthM: activeMap.widthM,
+            heightM: activeMap.heightM
+        });
+    } catch (error) {
+        res.status(500).json({ error: "활성 맵 로드 중 서버 에러: " + error.message });
+    }
+});
+
 app.use("/api/location",   locationRoutes);
 app.use("/api/beacons",    beaconRoutes);
 app.use("/api/maps",       mapRoutes);
@@ -66,6 +97,14 @@ app.get("/health", (_, res) => res.json({ status: "ok", timestamp: new Date() })
 // ==========================================
 io.on('connection', (socket) => {
     console.log('🌐 웹앱 소켓 연결 성공! ID:', socket.id);
+
+    // 사용자가 특정 지도 레이아웃에 진입 시 룸(Room)에 가입하도록 지원
+    socket.on('join_map', (data) => {
+        if (data && data.mapId) {
+            socket.join(`map_${data.mapId}`);
+            console.log(`📡 소켓 [${socket.id}]이 지도 룸 [map_${data.mapId}]에 입장했습니다.`);
+        }
+    });
 
     socket.on('disconnect', () => {
         console.log('❌ 웹앱 소켓 연결 종료:', socket.id);

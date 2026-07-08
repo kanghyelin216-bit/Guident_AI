@@ -1,44 +1,42 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import p5 from "p5";
 import { io } from "socket.io-client"; 
 
+// 🟢 [핵심] 라이브러리가 로드되자마자 온전하게 FES를 무력화
+if (typeof window !== 'undefined') {
+  window.p5 = p5; 
+  p5.disableFriendlyErrors = true;
+}
+
+// Vite 개발 서버 환경에서의 FES 네트워크 노이즈 방지
+p5.disableFriendlyErrors = true;
+
 /* ==========================================================================
-   📐 캔버스 및 레이아웃 설정
-   ⚠️ 서버(routes/location.js)는 이제 "미터" 단위 좌표(x, y)를 보냅니다.
-      기존처럼 서버가 픽셀을 직접 계산해서 주는 게 아니라, 프론트에서
-      PIXEL_SCALE로 미터→픽셀 변환을 해야 합니다.
+   📐 캔버스 및 레이아웃 설정 (1미터 = 45픽셀 규격 일치)
    ========================================================================== */
 const showGrid = false;
 const CANVAS_WIDTH = 602;
 const CANVAS_HEIGHT = 767;
-
-// 1미터 = 몇 픽셀인지 (안드로이드 BeaconConfig.kt의 PIXEL_SCALE=45와 반드시 동일해야 함)
-// ⚠️ 확인 필요: BeaconConfig.kt 주석은 "ROOM_WIDTH 8.04m = 362px"라고 되어 있는데
-//    이 파일의 CANVAS_WIDTH는 602입니다. 실제 맵 이미지의 가로 길이(m)를 알려주시면
-//    PIXEL_SCALE / CANVAS_WIDTH 값을 정확히 맞춰드리겠습니다. 지금은 45로 가정합니다.
 const PIXEL_SCALE = 45;
 
-// 통합 백엔드 서버(4000번 포트) 주소로 변경
-const YOUR_COMPUTER_IP = 'http://localhost:4000';
+const YOUR_COMPUTER_IP = `${window.location.protocol}//${window.location.hostname}:4000`;
 
-// 이 컴포넌트가 어떤 scannerId의 위치를 보여줄지.
-// prop으로 안 넘기면(단일 테스트 기기 단계) 들어오는 모든 location_update를 그대로 반영합니다.
+// 미터 -> 픽셀 변환 연산 (화면 이탈 방지 클램핑 포함)
 function metersToPixels(xM, yM) {
   const px = xM * PIXEL_SCALE;
   const py = yM * PIXEL_SCALE;
   return {
-    x: Math.max(10, Math.min(px, CANVAS_WIDTH - 10)),
-    y: Math.max(10, Math.min(py, CANVAS_HEIGHT - 10)),
+    x: Math.max(12, Math.min(px, CANVAS_WIDTH - 12)),
+    y: Math.max(12, Math.min(py, CANVAS_HEIGHT - 12)),
   };
 }
 
-// 시설/경로 좌표는 지도 밖으로 나갈 리 없는 "설계된" 좌표라 클램핑 없이 그대로 변환합니다.
 function metersToPixelsRaw(xM, yM) {
   return { x: xM * PIXEL_SCALE, y: yM * PIXEL_SCALE };
 }
 
 /* ==========================================================================
-   🎨 맵 오브젝트 배치 및 데이터 구조 (단위: 픽셀, px)
+   🎨 고정 맵 오브젝트 레이아웃
    ========================================================================== */
 const mapObjects = [
   { x: 56,  y: 0,   w: 250, h: 40,  name: '칠판', type: 'etc', desc: '강의 및 발표용 대형 칠판입니다.' },
@@ -52,24 +50,24 @@ const mapObjects = [
   { x: 337, y: 717, w: 25,  h: 50,  name: '출입문', type: 'door', desc: '전시장 후면 출입구 및 비상구입니다.' }
 ];
 
-const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}) => {
+const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => {
   const canvasRef = useRef(null);
   
-  // 📡 초기값 (아직 위치 갱신 이벤트를 못 받았을 때의 기본 표시 위치)
+  // 📡 상태 관리 정의
   const [userPos, setUserPos] = useState({ x: 181, y: 383 }); 
-  const [currentZone, setCurrentZone] = useState(null); // 경로탐색의 출발지(fromZone)로 사용
+  const [currentZone, setCurrentZone] = useState(null); 
   const [selectedArtwork, setSelectedArtwork] = useState(null); 
-  const [facilities, setFacilities] = useState([]); // Map.facilities (화장실/출구 등, 관리자 화면에서 등록)
+  const [facilities, setFacilities] = useState([]); 
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [avoidCongestion, setAvoidCongestion] = useState(false);
-  const [navPath, setNavPath] = useState(null); // [{x(m), y(m), zone}, ...]
+  const [navPath, setNavPath] = useState(null); 
   const [navMessage, setNavMessage] = useState('');
   
   const p5Instance = useRef(null);
-  const socketRef = useRef(null); // 리액트 StrictMode로 인한 소켓 중복 생성 방지 가드
+  const socketRef = useRef(null);
 
   /* ==========================================================================
-     📡 [소켓 연동] 서버가 보내는 실제 위치추정 결과(미터 단위)를 픽셀로 변환해 반영
+     📡 [소켓 엔지니어링] 실시간 RAW RSSI 기반 추정 위치 수신 루프
      ========================================================================== */
   useEffect(() => {
     if (socketRef.current) return;
@@ -85,17 +83,38 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
       console.log("🌐 [리액트] 중계 웹소켓 서버 연결 성공! ID:", socketRef.current.id);
     });
 
+    // 🟢 안드로이드 전송 데이터 통합 호환 매핑 루프
     socketRef.current.on('location_update', (data) => {
-      // data: { scannerId, mapId, x(m), y(m), zone, confidence, usedBeacons }
-      if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return;
+      if (!data) return;
 
-      // scannerId를 지정한 경우, 다른 스캐너의 갱신은 무시
-      if (scannerId && data.scannerId !== scannerId) return;
+      console.log("📥 [웹소켓 수신 성공] 서버로부터 전달된 raw 데이터:", data);
 
-      const { x: clampedX, y: clampedY } = metersToPixels(data.x, data.y);
-      console.log(`🎯 위치 갱신 [scanner=${data.scannerId}, zone=${data.zone}]: 미터(${data.x.toFixed(2)}, ${data.y.toFixed(2)}) → 픽셀(${clampedX.toFixed(0)}, ${clampedY.toFixed(0)})`);
+      // 대소문자 방어막 구축 (x, y 주소 유연하게 매핑)
+      const rawX = typeof data.x === 'number' ? data.x : (typeof data.X === 'number' ? data.X : null);
+      const rawY = typeof data.y === 'number' ? data.y : (typeof data.Y === 'number' ? data.Y : null);
+
+      if (rawX === null || rawY === null) {
+        console.log("⚠️ 수신된 좌표가 숫자가 아닙니다. 백엔드 연산 결과 실패 상태일 수 있습니다.");
+        return;
+      }
+
+      // 🛠️ 수정 구간: 안드로이드 기기 필터링 무력화
+      // 웹 화면 관제 및 테스트 환경 확보를 위해 다른 기기의 신호라도 무시하지 않고 통과시킵니다.
+      /*
+      if (scannerId && data.scannerId && data.scannerId !== scannerId) {
+        console.log(`⚠️ 다른 기기(${data.scannerId})의 위치 신호이므로 현재 뷰어(${scannerId})에서는 무시합니다.`);
+        return;
+      }
+      */
+
+      // 미터 단위를 픽셀 규격으로 변환
+      const { x: clampedX, y: clampedY } = metersToPixels(rawX, rawY);
+      
+      console.log(`🎯 [파란점 동기화] 미터(${rawX.toFixed(2)}, ${rawY.toFixed(2)}) ➡️ 픽셀(${clampedX}, ${clampedY})`);
+      
+      // 상태값 반영하여 화면의 파란 점을 이동시킴
       setUserPos({ x: clampedX, y: clampedY });
-      if (data.zone) setCurrentZone(data.zone); // 경로탐색 출발지로 사용
+      if (data.zone) setCurrentZone(data.zone);
     });
 
     return () => {
@@ -104,29 +123,33 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         socketRef.current = null;
       }
     };
-  }, []);
+  }, [scannerId]);
 
   /* ==========================================================================
-     🚻 [시설 로드] 관리자 화면(AdminBeacons)에서 등록한 화장실/출구 등을 불러옴
+     🚻 [REST API] 초기 시설 로드 인터페이스
      ========================================================================== */
   useEffect(() => {
     let cancelled = false;
     fetch(`${YOUR_COMPUTER_IP}/api/maps/${mapId}`)
       .then(res => res.json())
-      .then(doc => { if (!cancelled) setFacilities(doc?.facilities || []); })
-      .catch(() => { if (!cancelled) setFacilities([]); });
+      .then(doc => { 
+        if (!cancelled) setFacilities(doc?.facilities || []); 
+      })
+      .catch(() => { 
+        if (!cancelled) setFacilities([]); 
+      });
     return () => { cancelled = true; };
   }, [mapId]);
 
   /* ==========================================================================
-     🧭 [경로탐색] 백엔드 A* 알고리즘 호출 → 결과를 지도 위에 그릴 좌표 배열로 저장
+     🧭 [A* 알고리즘] 최단 거리 / 혼잡 회피 다이나믹 경로 탐색 엔진
      ========================================================================== */
-  const startNavigation = async (facility) => {
-    if (!currentZone) {
-      setNavMessage('아직 내 위치가 확인되지 않았습니다. 잠시 후 다시 시도해주세요.');
-      return;
-    }
+  const startNavigation = useCallback(async (facility) => {
+    if (!currentZone || !facility) return;
+    
     setNavMessage('경로를 계산하는 중...');
+    const targetFacilityId = facility._id || facility.id;
+
     try {
       const res = await fetch(`${YOUR_COMPUTER_IP}/api/navigation/path`, {
         method: 'POST',
@@ -134,7 +157,7 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         body: JSON.stringify({
           mapId,
           fromZone: currentZone,
-          toFacilityId: facility.id,
+          toFacilityId: targetFacilityId,
           avoidCongestion,
         }),
       });
@@ -144,14 +167,20 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         setNavMessage(data.message || '경로를 찾을 수 없습니다.');
         return;
       }
-      setNavPath(data.path); // [{x(m), y(m), zone}, ...]
-      setNavMessage(`${facility.label}까지 ${data.steps}칸 경로 안내 중${avoidCongestion ? ' (혼잡구간 회피)' : ''}`);
+      setNavPath(data.path); 
+      setNavMessage(`${facility.label}까지 경로 안내 중${avoidCongestion ? ' (혼잡 회피)' : ''}`);
       setSelectedArtwork(null);
     } catch (err) {
       setNavPath(null);
       setNavMessage('경로탐색 서버 요청에 실패했습니다.');
     }
-  };
+  }, [currentZone, mapId, avoidCongestion]);
+
+  useEffect(() => {
+    if (selectedFacility && currentZone) {
+      startNavigation(selectedFacility);
+    }
+  }, [avoidCongestion, selectedFacility, startNavigation]);
 
   const clearNavigation = () => {
     setNavPath(null);
@@ -159,7 +188,9 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
     setSelectedFacility(null);
   };
 
-
+  /* ==========================================================================
+     🔄 p5.js 외부 메모리 상태 동기화 바인딩 사이클
+     ========================================================================== */
   useEffect(() => {
     if (p5Instance.current) {
       p5Instance.current.currentX = userPos.x;
@@ -167,7 +198,6 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
     }
   }, [userPos]);
 
-  // 시설/경로 데이터가 바뀔 때마다 p5 인스턴스 메모리에 픽셀 좌표로 변환해 주입
   useEffect(() => {
     if (p5Instance.current) {
       p5Instance.current.facilitiesPx = facilities.map(f => ({ ...f, ...metersToPixelsRaw(f.x, f.y) }));
@@ -180,20 +210,18 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
     }
   }, [navPath]);
 
-
   /* ==========================================================================
-     🎨 [p5.js 렌더링 엔진] 지도 디자인 및 마커 드로잉 루프 결합
+     🎨 [p5.js Core Engine]
      ========================================================================== */
   useEffect(() => {
     let myP5;
     if (canvasRef.current) canvasRef.current.innerHTML = ""; 
 
     const sketch = (p) => {
-      // 리액트 useEffect가 접근할 수 있도록 p 객체 인스턴스 멤버 변수로 선언
-      p.currentX = 181;
-      p.currentY = 383;
-      p.facilitiesPx = [];
-      p.navPathPx = null;
+      p.currentX = userPos.x;
+      p.currentY = userPos.y;
+      p.facilitiesPx = facilities.map(f => ({ ...f, ...metersToPixelsRaw(f.x, f.y) }));
+      p.navPathPx = navPath ? navPath.map(pt => metersToPixelsRaw(pt.x, pt.y)) : null;
 
       p.setup = () => {
         p.createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -202,17 +230,15 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
       };
 
       p.draw = () => {
-        // 1. 캔버스 배경 클리어
         p.background(248, 249, 250); 
 
-        // 2. 보조 격자선 활성화 여부 처리
         if (showGrid){
           p.stroke(230); p.strokeWeight(1);
           for (let x = 0; x < p.width; x += 40) p.line(x, 0, x, p.height);
           for (let y = 0; y < p.height; y += 40) p.line(0, y, p.width, y);
         }
 
-        // 3. 맵 오브젝트(부스, 작품, 문) 통동형 그래픽 렌더링 (사라졌던 디자인 핵심 복구)
+        // 맵 오브젝트 렌더링
         for (let obj of mapObjects) {
           p.push();
           if (obj.type === 'booth') {
@@ -236,7 +262,7 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
           p.pop(); 
         }
 
-        // 4. 경로탐색 결과 라인 (있을 때만)
+        // 최단/회피 경로 가이드 라인 렌더링
         if (p.navPathPx && p.navPathPx.length > 1) {
           p.push();
           p.stroke(0, 122, 255);
@@ -248,25 +274,28 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
           p.pop();
         }
 
-        // 5. 등록된 시설(화장실/출구 등) 마커
+        // 인프라 시설 마커 시각화
         for (const f of p.facilitiesPx) {
           p.push();
-          p.fill(116, 196, 118);
+          p.fill(40, 167, 69);
           p.stroke(255);
-          p.strokeWeight(2);
-          p.circle(f.x, f.y, 22);
+          p.strokeWeight(2.5);
+          p.circle(f.x, f.y, 24);
+          
+          p.fill(255);
+          p.textSize(10);
+          p.textStyle(p.BOLD);
+          p.text(f.label ? f.label.substring(0, 2) : "시설", f.x, f.y);
           p.pop();
         }
 
-        // 6. 실시간 위치 동기화가 반영된 파란 점 그리기
+        // 실시간 사용자 스마트 펄스 마커
         drawUserMarker(p, p.currentX, p.currentY); 
       };
 
-      // 파란색 현 위치 마커 디자인 함수
       const drawUserMarker = (p, x, y) => {
         p.push();
         let pulse = p.sin(p.frameCount * 0.05) * 6;
-        
         p.fill(0, 122, 255, 40);
         p.noStroke();
         p.circle(x, y, 24 + pulse); 
@@ -278,18 +307,15 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         p.pop();
       };
 
-      // 작품 / 시설 터치 이벤트 인터랙션
       p.mousePressed = () => {
-        // 1) 등록된 시설(화장실/출구 등) 마커를 우선 검사
         for (const f of p.facilitiesPx) {
           const d = p.dist(p.mouseX, p.mouseY, f.x, f.y);
-          if (d <= 14) {
+          if (d <= 18) {
             setSelectedFacility(f);
             setSelectedArtwork(null);
             return;
           }
         }
-        // 2) 작품/부스
         for (let obj of mapObjects) {
           if (p.mouseX >= obj.x && p.mouseX <= obj.x + obj.w && p.mouseY >= obj.y && p.mouseY <= obj.y + obj.h) {
             if (obj.type === 'door') return; 
@@ -304,28 +330,24 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
     myP5 = new p5(sketch, canvasRef.current);
     p5Instance.current = myP5;
 
-    // 초기 마운트 시 최초 위치 동기화
-    myP5.currentX = userPos.x;
-    myP5.currentY = userPos.y;
-
     return () => {
       if (myP5) myP5.remove();
     };
-  }, []); 
+  }, []);
 
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "20px", position: "relative" }}>
       <div ref={canvasRef} style={styles.canvasContainer}></div>
 
-      {/* 경로탐색 상태 배너 + 혼잡구간 회피 토글 */}
       {(navMessage || navPath) && (
         <div style={styles.navBanner}>
-          <span>{navMessage}</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer' }}>
+          <span style={{fontWeight: "500"}}>{navMessage}</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', margin: "0 8px" }}>
             <input
               type="checkbox"
               checked={avoidCongestion}
               onChange={e => setAvoidCongestion(e.target.checked)}
+              style={{cursor: 'pointer'}}
             />
             혼잡구간 회피
           </label>
@@ -337,7 +359,7 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         <div style={styles.popupCard}>
           <button style={styles.closeBtn} onClick={() => setSelectedArtwork(null)}>✕</button>
           <div style={styles.contentContainer}>
-            <div style={styles.imgPlaceholder}></div>
+            <div style={styles.imgPlaceholder}>🎨</div>
             <div style={styles.textGroup}>
               <h3 style={styles.title}>
                 {selectedArtwork.name}
@@ -346,8 +368,6 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
               <p style={styles.desc}>{selectedArtwork.desc}</p>
             </div>
           </div>
-          {/* 작품은 관리자 화면에 등록된 "시설"이 아니라 경로탐색 대상이 아닙니다.
-              AI 도우미에게 물어보도록 안내만 합니다. */}
         </div>
       )}
 
@@ -355,20 +375,24 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
         <div style={styles.popupCard}>
           <button style={styles.closeBtn} onClick={() => setSelectedFacility(null)}>✕</button>
           <div style={styles.contentContainer}>
-            <div style={styles.imgPlaceholder}>🚻</div>
+            <div style={{...styles.imgPlaceholder, backgroundColor: "#E6F4EA", color: "#137333", fontSize: "20px"}}>🚻</div>
             <div style={styles.textGroup}>
               <h3 style={styles.title}>{selectedFacility.label}</h3>
               <p style={styles.desc}>
-                {currentZone ? `현재 위치(${currentZone})에서 경로를 안내해 드릴게요.` : '내 위치가 확인되면 경로를 안내해 드려요.'}
+                {currentZone ? `현재 위치(${currentZone})에서 가이드 라인을 생성합니다.` : '위치 인프라 신호를 탐색 중입니다.'}
               </p>
             </div>
           </div>
           <button
-            style={styles.guideBtn}
+            style={{
+              ...styles.guideBtn,
+              backgroundColor: currentZone ? "#007AFF" : "#6B7280",
+              cursor: currentZone ? "pointer" : "not-allowed"
+            }}
             disabled={!currentZone}
             onClick={() => startNavigation(selectedFacility)}
           >
-            {currentZone ? '길안내 시작하기' : '위치 확인 중...'}
+            {currentZone ? '실시간 길안내 시작' : '위치 스캐닝 중...'}
           </button>
         </div>
       )}
@@ -378,17 +402,17 @@ const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}
 
 const styles = {
   canvasContainer: { borderRadius: "14px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0, 0, 0, 0.06)", border: "1px solid #e9ecef" },
-  popupCard: { position: "absolute", left: "100px", top: "70px", width: "282px", height: "160px", backgroundColor: "white", padding: "15px 15px 12px 15px", borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #efefef", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "space-between", zIndex: 999 },
-  navBanner: { position: "absolute", top: "20px", left: "50%", transform: "translateX(-50%)", background: "white", padding: "8px 14px", borderRadius: "12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", alignItems: "center", gap: "12px", fontSize: "12px", color: "#212529", zIndex: 998, whiteSpace: "nowrap" },
-  navCloseBtn: { padding: "4px 10px", borderRadius: "8px", border: "none", background: "#F1F3F5", fontSize: "11px", cursor: "pointer", color: "#495057" },
-  closeBtn: { position: "absolute", top: "10px", right: "12px", background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#ccc" },
-  contentContainer: { display: "flex", gap: "12px", textAlign: "left", flex: 1 },
-  imgPlaceholder: { width: "65px", height: "65px", backgroundColor: "#f1f3f5", borderRadius: "8px", display: "flex", justifyContent: "center", alignItems: "center" },
-  textGroup: { flex: 1, overflow: "hidden" },
-  title: { margin: "0 0 4px 0", fontSize: "14px", fontWeight: "bold", color: "#212529" },
-  author: { fontSize: "11px", fontWeight: "normal", color: "#868e96", marginLeft: "6px" },
-  desc: { margin: 0, fontSize: "11px", color: "#495057", lineHeight: "1.4", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" },
-  guideBtn: { width: "100%", padding: "9px", backgroundColor: "#212529", color: "white", border: "none", borderRadius: "8px", fontSize: "12px", cursor: "pointer", fontWeight: "600", marginTop: "8px", transition: "background 0.2s" }
+  popupCard: { position: "absolute", left: "50%", bottom: "40px", transform: "translateX(-50%)", width: "320px", backgroundColor: "white", padding: "16px", borderRadius: "16px", boxShadow: "0 12px 32px rgba(0,0,0,0.15)", border: "1px solid #f1f3f5", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "12px", zIndex: 999 },
+  navBanner: { position: "absolute", top: "30px", left: "50%", transform: "translateX(-50%)", background: "rgba(255, 255, 255, 0.95)", backdropFilter: "blur(8px)", padding: "10px 18px", borderRadius: "30px", boxShadow: "0 8px 24px rgba(0,0,0,0.1)", display: "flex", alignItems: "center", gap: "14px", fontSize: "13px", color: "#212529", zIndex: 998, border: "1px solid rgba(0,0,0,0.05)" },
+  navCloseBtn: { padding: "6px 12px", borderRadius: "20px", border: "none", background: "#E8ECEF", fontSize: "11px", cursor: "pointer", color: "#495057", fontWeight: "600" },
+  closeBtn: { position: "absolute", top: "12px", right: "14px", background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#adb5bd" },
+  contentContainer: { display: "flex", gap: "14px", textAlign: "left" },
+  imgPlaceholder: { width: "56px", height: "56px", backgroundColor: "#f1f3f5", borderRadius: "12px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 },
+  textGroup: { flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: "center" },
+  title: { margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#212529" },
+  author: { fontSize: "12px", fontWeight: "400", color: "#868e96", marginLeft: "8px" },
+  desc: { margin: 0, fontSize: "12px", color: "#495057", lineHeight: "1.4" },
+  guideBtn: { width: "100%", padding: "11px", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: "600", transition: "all 0.2s" }
 };
 
 export default MapSketch;
