@@ -32,6 +32,11 @@ function metersToPixels(xM, yM) {
   };
 }
 
+// 시설/경로 좌표는 지도 밖으로 나갈 리 없는 "설계된" 좌표라 클램핑 없이 그대로 변환합니다.
+function metersToPixelsRaw(xM, yM) {
+  return { x: xM * PIXEL_SCALE, y: yM * PIXEL_SCALE };
+}
+
 /* ==========================================================================
    🎨 맵 오브젝트 배치 및 데이터 구조 (단위: 픽셀, px)
    ========================================================================== */
@@ -47,12 +52,18 @@ const mapObjects = [
   { x: 337, y: 717, w: 25,  h: 50,  name: '출입문', type: 'door', desc: '전시장 후면 출입구 및 비상구입니다.' }
 ];
 
-const MapSketch = ({ scannerId = null } = {}) => {
+const MapSketch = ({ scannerId = null, mapId = '6600a1b2c3d4e5f6789abcde' } = {}) => {
   const canvasRef = useRef(null);
   
   // 📡 초기값 (아직 위치 갱신 이벤트를 못 받았을 때의 기본 표시 위치)
   const [userPos, setUserPos] = useState({ x: 181, y: 383 }); 
+  const [currentZone, setCurrentZone] = useState(null); // 경로탐색의 출발지(fromZone)로 사용
   const [selectedArtwork, setSelectedArtwork] = useState(null); 
+  const [facilities, setFacilities] = useState([]); // Map.facilities (화장실/출구 등, 관리자 화면에서 등록)
+  const [selectedFacility, setSelectedFacility] = useState(null);
+  const [avoidCongestion, setAvoidCongestion] = useState(false);
+  const [navPath, setNavPath] = useState(null); // [{x(m), y(m), zone}, ...]
+  const [navMessage, setNavMessage] = useState('');
   
   const p5Instance = useRef(null);
   const socketRef = useRef(null); // 리액트 StrictMode로 인한 소켓 중복 생성 방지 가드
@@ -84,6 +95,7 @@ const MapSketch = ({ scannerId = null } = {}) => {
       const { x: clampedX, y: clampedY } = metersToPixels(data.x, data.y);
       console.log(`🎯 위치 갱신 [scanner=${data.scannerId}, zone=${data.zone}]: 미터(${data.x.toFixed(2)}, ${data.y.toFixed(2)}) → 픽셀(${clampedX.toFixed(0)}, ${clampedY.toFixed(0)})`);
       setUserPos({ x: clampedX, y: clampedY });
+      if (data.zone) setCurrentZone(data.zone); // 경로탐색 출발지로 사용
     });
 
     return () => {
@@ -95,14 +107,79 @@ const MapSketch = ({ scannerId = null } = {}) => {
   }, []);
 
   /* ==========================================================================
-     📡 [강제 동기화] 리액트 State가 변경되면 p5 캔버스 메모리에 실시간 주입
+     🚻 [시설 로드] 관리자 화면(AdminBeacons)에서 등록한 화장실/출구 등을 불러옴
      ========================================================================== */
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${YOUR_COMPUTER_IP}/api/maps/${mapId}`)
+      .then(res => res.json())
+      .then(doc => { if (!cancelled) setFacilities(doc?.facilities || []); })
+      .catch(() => { if (!cancelled) setFacilities([]); });
+    return () => { cancelled = true; };
+  }, [mapId]);
+
+  /* ==========================================================================
+     🧭 [경로탐색] 백엔드 A* 알고리즘 호출 → 결과를 지도 위에 그릴 좌표 배열로 저장
+     ========================================================================== */
+  const startNavigation = async (facility) => {
+    if (!currentZone) {
+      setNavMessage('아직 내 위치가 확인되지 않았습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    setNavMessage('경로를 계산하는 중...');
+    try {
+      const res = await fetch(`${YOUR_COMPUTER_IP}/api/navigation/path`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mapId,
+          fromZone: currentZone,
+          toFacilityId: facility.id,
+          avoidCongestion,
+        }),
+      });
+      const data = await res.json();
+      if (!data.found) {
+        setNavPath(null);
+        setNavMessage(data.message || '경로를 찾을 수 없습니다.');
+        return;
+      }
+      setNavPath(data.path); // [{x(m), y(m), zone}, ...]
+      setNavMessage(`${facility.label}까지 ${data.steps}칸 경로 안내 중${avoidCongestion ? ' (혼잡구간 회피)' : ''}`);
+      setSelectedArtwork(null);
+    } catch (err) {
+      setNavPath(null);
+      setNavMessage('경로탐색 서버 요청에 실패했습니다.');
+    }
+  };
+
+  const clearNavigation = () => {
+    setNavPath(null);
+    setNavMessage('');
+    setSelectedFacility(null);
+  };
+
+
   useEffect(() => {
     if (p5Instance.current) {
       p5Instance.current.currentX = userPos.x;
       p5Instance.current.currentY = userPos.y;
     }
   }, [userPos]);
+
+  // 시설/경로 데이터가 바뀔 때마다 p5 인스턴스 메모리에 픽셀 좌표로 변환해 주입
+  useEffect(() => {
+    if (p5Instance.current) {
+      p5Instance.current.facilitiesPx = facilities.map(f => ({ ...f, ...metersToPixelsRaw(f.x, f.y) }));
+    }
+  }, [facilities]);
+
+  useEffect(() => {
+    if (p5Instance.current) {
+      p5Instance.current.navPathPx = navPath ? navPath.map(pt => metersToPixelsRaw(pt.x, pt.y)) : null;
+    }
+  }, [navPath]);
+
 
   /* ==========================================================================
      🎨 [p5.js 렌더링 엔진] 지도 디자인 및 마커 드로잉 루프 결합
@@ -115,6 +192,8 @@ const MapSketch = ({ scannerId = null } = {}) => {
       // 리액트 useEffect가 접근할 수 있도록 p 객체 인스턴스 멤버 변수로 선언
       p.currentX = 181;
       p.currentY = 383;
+      p.facilitiesPx = [];
+      p.navPathPx = null;
 
       p.setup = () => {
         p.createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -157,7 +236,29 @@ const MapSketch = ({ scannerId = null } = {}) => {
           p.pop(); 
         }
 
-        // 4. 실시간 위치 동기화가 반영된 파란 점 그리기
+        // 4. 경로탐색 결과 라인 (있을 때만)
+        if (p.navPathPx && p.navPathPx.length > 1) {
+          p.push();
+          p.stroke(0, 122, 255);
+          p.strokeWeight(4);
+          p.noFill();
+          p.beginShape();
+          for (const pt of p.navPathPx) p.vertex(pt.x, pt.y);
+          p.endShape();
+          p.pop();
+        }
+
+        // 5. 등록된 시설(화장실/출구 등) 마커
+        for (const f of p.facilitiesPx) {
+          p.push();
+          p.fill(116, 196, 118);
+          p.stroke(255);
+          p.strokeWeight(2);
+          p.circle(f.x, f.y, 22);
+          p.pop();
+        }
+
+        // 6. 실시간 위치 동기화가 반영된 파란 점 그리기
         drawUserMarker(p, p.currentX, p.currentY); 
       };
 
@@ -177,12 +278,23 @@ const MapSketch = ({ scannerId = null } = {}) => {
         p.pop();
       };
 
-      // 작품 터치 이벤트 인터랙션
+      // 작품 / 시설 터치 이벤트 인터랙션
       p.mousePressed = () => {
+        // 1) 등록된 시설(화장실/출구 등) 마커를 우선 검사
+        for (const f of p.facilitiesPx) {
+          const d = p.dist(p.mouseX, p.mouseY, f.x, f.y);
+          if (d <= 14) {
+            setSelectedFacility(f);
+            setSelectedArtwork(null);
+            return;
+          }
+        }
+        // 2) 작품/부스
         for (let obj of mapObjects) {
           if (p.mouseX >= obj.x && p.mouseX <= obj.x + obj.w && p.mouseY >= obj.y && p.mouseY <= obj.y + obj.h) {
             if (obj.type === 'door') return; 
             setSelectedArtwork(obj); 
+            setSelectedFacility(null);
             return; 
           }
         }
@@ -205,6 +317,22 @@ const MapSketch = ({ scannerId = null } = {}) => {
     <div style={{ display: "flex", justifyContent: "center", padding: "20px", position: "relative" }}>
       <div ref={canvasRef} style={styles.canvasContainer}></div>
 
+      {/* 경로탐색 상태 배너 + 혼잡구간 회피 토글 */}
+      {(navMessage || navPath) && (
+        <div style={styles.navBanner}>
+          <span>{navMessage}</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={avoidCongestion}
+              onChange={e => setAvoidCongestion(e.target.checked)}
+            />
+            혼잡구간 회피
+          </label>
+          <button style={styles.navCloseBtn} onClick={clearNavigation}>경로 닫기</button>
+        </div>
+      )}
+
       {selectedArtwork && (
         <div style={styles.popupCard}>
           <button style={styles.closeBtn} onClick={() => setSelectedArtwork(null)}>✕</button>
@@ -218,8 +346,29 @@ const MapSketch = ({ scannerId = null } = {}) => {
               <p style={styles.desc}>{selectedArtwork.desc}</p>
             </div>
           </div>
-          <button style={styles.guideBtn} onClick={() => alert(`${selectedArtwork.name} 안내를 시작합니다.`)}>
-            길안내 시작하기
+          {/* 작품은 관리자 화면에 등록된 "시설"이 아니라 경로탐색 대상이 아닙니다.
+              AI 도우미에게 물어보도록 안내만 합니다. */}
+        </div>
+      )}
+
+      {selectedFacility && (
+        <div style={styles.popupCard}>
+          <button style={styles.closeBtn} onClick={() => setSelectedFacility(null)}>✕</button>
+          <div style={styles.contentContainer}>
+            <div style={styles.imgPlaceholder}>🚻</div>
+            <div style={styles.textGroup}>
+              <h3 style={styles.title}>{selectedFacility.label}</h3>
+              <p style={styles.desc}>
+                {currentZone ? `현재 위치(${currentZone})에서 경로를 안내해 드릴게요.` : '내 위치가 확인되면 경로를 안내해 드려요.'}
+              </p>
+            </div>
+          </div>
+          <button
+            style={styles.guideBtn}
+            disabled={!currentZone}
+            onClick={() => startNavigation(selectedFacility)}
+          >
+            {currentZone ? '길안내 시작하기' : '위치 확인 중...'}
           </button>
         </div>
       )}
@@ -230,6 +379,8 @@ const MapSketch = ({ scannerId = null } = {}) => {
 const styles = {
   canvasContainer: { borderRadius: "14px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0, 0, 0, 0.06)", border: "1px solid #e9ecef" },
   popupCard: { position: "absolute", left: "100px", top: "70px", width: "282px", height: "160px", backgroundColor: "white", padding: "15px 15px 12px 15px", borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #efefef", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "space-between", zIndex: 999 },
+  navBanner: { position: "absolute", top: "20px", left: "50%", transform: "translateX(-50%)", background: "white", padding: "8px 14px", borderRadius: "12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", alignItems: "center", gap: "12px", fontSize: "12px", color: "#212529", zIndex: 998, whiteSpace: "nowrap" },
+  navCloseBtn: { padding: "4px 10px", borderRadius: "8px", border: "none", background: "#F1F3F5", fontSize: "11px", cursor: "pointer", color: "#495057" },
   closeBtn: { position: "absolute", top: "10px", right: "12px", background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#ccc" },
   contentContainer: { display: "flex", gap: "12px", textAlign: "left", flex: 1 },
   imgPlaceholder: { width: "65px", height: "65px", backgroundColor: "#f1f3f5", borderRadius: "8px", display: "flex", justifyContent: "center", alignItems: "center" },

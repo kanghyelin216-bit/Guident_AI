@@ -1,7 +1,8 @@
-import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft } from 'lucide-react';
+import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft, Settings } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import MapSection from './MapSketch'; 
+import AdminBeaconsSection from './AdminBeacons';
 
 // ✅ 통합 백엔드 서버(4000번 포트)의 베이스 URL 설정
 const YOUR_COMPUTER_IP = 'http://localhost:4000'; 
@@ -47,6 +48,13 @@ const MENU_ITEMS = [
   { id: 'recommend', icon: TrendingUp,    label: '맞춤 추천',          desc: '관심사 기반 전시물 추천',           color: '#FEF0F5', accent: '#F768A1', emoji: '✨' },
 ];
 
+// 관리자 전용 메뉴. 일반 방문객에게는 노출되지 않고, ?admin=1 로 접속했을 때만 보입니다.
+// (아직 로그인/인증이 없는 임시 게이트입니다 — 실제 배포 전엔 JWT 등 인증으로 반드시 교체하세요)
+const ADMIN_MENU_ITEM = {
+  id: 'admin', icon: Settings, label: '관리자: 비콘 등록', desc: '지도 클릭으로 비콘 좌표 등록',
+  color: '#F1F3F5', accent: '#495057', emoji: '⚙️',
+};
+
 const T = {
   bg: '#FAFBFF', card: '#FFFFFF', border: '#EEF0F6', radius: '18px',
   shadow: '0 2px 12px rgba(100,120,180,0.08)', shadowMd: '0 4px 20px rgba(100,120,180,0.13)',
@@ -90,8 +98,8 @@ function useCongestion() {
 }
 
 /* ── 헤더 ── */
-function Header({ activePage, onBack, paired }) {
-  const activeMenu = MENU_ITEMS.find(m => m.id === activePage);
+function Header({ activePage, onBack, paired, allMenuItems }) {
+  const activeMenu = allMenuItems.find(m => m.id === activePage);
   return (
     <header style={{
       position: 'sticky', top: 0, zIndex: 20,
@@ -127,11 +135,11 @@ function Header({ activePage, onBack, paired }) {
 }
 
 /* ── 홈 메뉴 ── */
-function HomeMenu({ onNavigate }) {
+function HomeMenu({ items, onNavigate }) {
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>어떤 기능을 이용하시겠어요? 👀</p>
-      {MENU_ITEMS.map((item) => {
+      {items.map((item) => {
         return (
           <button key={item.id} onClick={() => onNavigate(item.id)} style={{
             display: 'flex', alignItems: 'center', gap: 14,
@@ -330,7 +338,7 @@ function RecommendSection() {
   );
 }
 
-const SECTION_MAP = { map: MapSection, exhibits: ExhibitsSection, chat: ChatSection, recommend: RecommendSection };
+const SECTION_MAP = { map: MapSection, exhibits: ExhibitsSection, chat: ChatSection, recommend: RecommendSection, admin: AdminBeaconsSection };
 
 export default function App() {
   const [activePage, setActivePage] = useState(null);
@@ -338,6 +346,11 @@ export default function App() {
   const [scannerId] = useState(() => getOrCreateWebScannerId());
   const paired = isPairedWithScanner(scannerId);
   const ActiveSection = activePage ? SECTION_MAP[activePage] : null;
+
+  // ⚠️ 임시 게이트: URL에 ?admin=1 이 있을 때만 관리자 메뉴 노출.
+  // 실제 인증(로그인)이 아니므로 배포 전 반드시 JWT 등으로 교체하세요.
+  const isAdmin = new URLSearchParams(window.location.search).get('admin') === '1';
+  const menuItems = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS;
 
   return (
     <div style={{
@@ -348,7 +361,7 @@ export default function App() {
       display: 'flex',
       flexDirection: 'column'
     }}>
-      <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} />
+      <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} allMenuItems={menuItems} />
 
       <main style={{
         width: '100%',
@@ -358,8 +371,8 @@ export default function App() {
         overflowY: activePage === 'map' ? 'auto' : 'visible'
       }}>
         {activePage === null
-          ? <HomeMenu onNavigate={setActivePage} />
-          : <ActiveSection scannerId={scannerId} />}
+          ? <HomeMenu items={menuItems} onNavigate={setActivePage} />
+          : <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} />}
       </main>
     </div>
   );
