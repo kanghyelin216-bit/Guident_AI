@@ -23,7 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-#env 파일 안 올라가게 설정
+#env 암호화
 node_modules
 .env
 .env.*
