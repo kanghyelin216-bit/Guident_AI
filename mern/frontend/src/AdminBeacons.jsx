@@ -15,7 +15,7 @@ const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production'
   ? window.location.origin 
   : (window.location.port === '5173' || window.location.port === '3000'
       ? `${window.location.protocol}//${window.location.hostname}:4000` // 백엔드 포트 자동 매핑
-      : 'http://192.168.219.106:4000'); // 기존 명시값 폴백
+      : 'http://192.168.219.104:4000'); // 기존 명시값 폴백
 
 const T = {
   bg: '#FAFBFF', card: '#FFFFFF', border: '#EEF0F6', radius: '14px',

@@ -1,16 +1,11 @@
 /**
  * routes/location.js
- * POST /api/location  — 스캐너 RSSI 수신 → 위치 추정 → 저장 → 실시간 브로드캐스트
- *
- * Body: {
- * scannerId: string,
- * mapId: string,
- * beacons: [{beaconId, rssi, distance}]  // 최대 5개
- * }
+ * POST /api/location — 스캐너 RSSI 수신 → 위치 추정 → 즉시 브로드캐스트 → 비동기 DB 적재
  */
 import { Router } from "express";
 import mongoose from "mongoose";
 import { Beacon, ScannerReading } from "../models/index.js";
+import BeaconLog from "../models/BeaconLog.js";
 import { estimateLocation } from "../modules/location/index.js";
 
 const router = Router();
@@ -22,112 +17,154 @@ async function getCongestionForMap(mapId) {
   const agg = await ScannerReading.aggregate([
     {
       $match: {
-        mapId: new mongoose.Types.ObjectId(mapId), // ⚠️ 명시적 ObjectId 캐스팅 (버그 수정)
+        mapId: new mongoose.Types.ObjectId(mapId),
         ts: { $gte: recent },
       },
     },
     { $group: { _id: "$zone", count: { $sum: 1 } } },
   ]);
 
-  // { "R01C02": 3, "R02C03": 1, ... }
   return Object.fromEntries(agg.map(a => [a._id, a.count]));
 }
 
 router.post("/", async (req, res) => {
-  const { scannerId, mapId, beacons = [] } = req.body;
+  try {
+    const { scannerId, mapId, beacons = [] } = req.body;
 
-  if (!scannerId || !mapId || beacons.length === 0)
-    return res.status(400).json({ error: "scannerId, mapId, beacons 필수" });
-
-  // MongoDB에서 비콘 좌표 로드 → Map으로 변환
-  const dbBeacons = await Beacon.find({ mapId });
-
-  // 📍 [디버깅 로그] 원인 A 및 원인 B 분석을 위한 서버 콘솔 출력 (개발 환경용)
-  if (process.env.NODE_ENV !== "production") {
-    console.log("========================================");
-    console.log("📍 [수신] 요청 mapId:", mapId);
-    console.log("📡 [DB] 조회된 비콘 수:", dbBeacons.length);
-    console.log("📡 [DB] 등록된 비콘 ID 리스트:", dbBeacons.map(b => b.beaconId));
-    console.log("📶 [안드로이드] 전송된 readings ID 리스트:", beacons.map(b => b.beaconId));
-    console.log("========================================");
-  }
-
-  // 원인 A 예방: DB에 해당 mapId로 등록된 비콘이 하나도 없는 경우 처리
-  if (dbBeacons.length === 0) {
-    return res.json({
-      status: "insufficient_data",
-      message: "해당 mapId로 등록된 비cons가 DB에 존재하지 않습니다 (mapId 불일치 의심)",
-      debug: { reason: "mapId_mismatch", requestedMapId: mapId }
-    });
-  }
-
-  const beaconMap = new Map(dbBeacons.map(b => [
-    String(b.beaconId).trim().toUpperCase(),
-    { x: b.x, y: b.y, txPower: b.txPower },
-  ]));
-
-  const readings = beacons.slice(0, 6).map(b => ({
-    beaconId: String(b.beaconId).trim().toUpperCase(),
-    rssi:     Number(b.rssi),
-    distance: Number(b.distance),
-  }));
-
-  // 원인 B 검증: 안드로이드에서 보낸 비콘 ID가 DB에 등록된 비콘 ID Map에 존재하는지 사전 체크
-  const matchedTest = readings.filter(r => beaconMap.has(r.beaconId));
-  if (matchedTest.length < 3) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn(`⚠️ 경고: 매칭된 비콘 부족 (${matchedTest.length}개). 안드로이드 ID와 관리자 등록 ID(A1~A6)를 확인하세요.`);
+    if (!scannerId || !mapId || beacons.length === 0) {
+      return res.status(400).json({ error: "scannerId, mapId, beacons 필수" });
     }
-  }
 
-  const result = estimateLocation(readings, beaconMap);
+    // 1. DB에서 비콘 정보 조회 (.lean()을 통한 쿼리 오버헤드 최소화)
+    const dbBeacons = await Beacon.find({ mapId }).lean();
 
-  // 위치 추정이 실패하거나 유효 비콘이 부족한 경우 상세 원인을 프론트 및 로그에 남김
-  if (!result) {
-    return res.json({ 
-      status: "insufficient_data", 
-      message: "유효 비콘 부족(최소 3개 매칭 필요)",
-      debug: {
-        reason: "beaconId_mismatch_or_insufficient",
-        dbBeaconCount: dbBeacons.length,
-        receivedCount: readings.length,
-        matchedCount: matchedTest.length,
-        receivedIds: readings.map(r => r.beaconId),
-        dbIds: Array.from(beaconMap.keys())
+    if (process.env.NODE_ENV !== "production") {
+      console.log("========================================");
+      console.log("📍 [수신] 요청 mapId:", mapId);
+      console.log("📡 [DB] 조회된 비콘 수:", dbBeacons.length);
+      console.log("📡 [DB] 등록된 비콘 ID 리스트:", dbBeacons.map(b => b.beaconId));
+      console.log("📶 [안드로이드] 전송된 readings ID 리스트:", beacons.map(b => b.beaconId));
+      console.log("========================================");
+    }
+
+    if (dbBeacons.length === 0) {
+      return res.json({
+        status: "insufficient_data",
+        message: "해당 mapId로 등록된 비콘이 DB에 존재하지 않습니다.",
+        debug: { reason: "mapId_mismatch", requestedMapId: mapId }
+      });
+    }
+
+    // 2. Beacon Map 생성 (대소문자/공백 제거 정규화)
+    const beaconMap = new Map(dbBeacons.map(b => [
+      String(b.beaconId).trim().toUpperCase(),
+      { x: b.x, y: b.y, txPower: b.txPower },
+    ]));
+
+    const readings = beacons.slice(0, 6).map(b => ({
+      beaconId: String(b.beaconId).trim().toUpperCase(),
+      rssi: Number(b.rssi),
+      distance: Number(b.distance),
+    }));
+
+    const matchedTest = readings.filter(r => beaconMap.has(r.beaconId));
+
+    // 3. Loose-Coupled 위치 추정 모듈 실행 (scannerId 파라미터 추가로 EMA 세션 추적 보장)
+    const result = estimateLocation(readings, beaconMap, String(scannerId));
+
+    if (!result) {
+      return res.json({ 
+        status: "insufficient_data", 
+        message: "유효 비콘 부족(최소 매칭 수 미달)",
+        debug: {
+          reason: "beaconId_mismatch_or_insufficient",
+          dbBeaconCount: dbBeacons.length,
+          receivedCount: readings.length,
+          matchedCount: matchedTest.length,
+          receivedIds: readings.map(r => r.beaconId),
+          dbIds: Array.from(beaconMap.keys())
+        }
+      });
+    }
+
+    // 4. ⚡ [최우선 처리] Socket.io 실시간 위치 전파 (대기시간 0ms 지향)
+    const io = req.app.get("io");
+    if (io) {
+      const payload = {
+        scannerId,
+        mapId,
+        x: result.x,
+        y: result.y,
+        zone: result.zone,
+        confidence: result.confidence,
+        usedBeacons: result.usedBeacons,
+      };
+
+      // Room 단절 대비: mapId Room과 전역 io에 모두 즉시 발송
+      io.to(mapId).emit("location_update", payload);
+      io.emit("location_update", payload);
+    }
+
+    // 🎯 디버그용 콘솔 출력
+    console.log("🎯 [계산된 위치]", result.x, result.y, result.zone);
+
+    // 5. ⚡ [즉시 응답] 안드로이드 앱으로 HTTP OK 응답 반환하여 Network Latency 최소화
+    res.json({ status: "ok", scannerId, location: result });
+
+    // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 무거운 혼잡도 연산은 응답 후 비동기 처리
+    setImmediate(async () => {
+      // (1) 비콘 로그 적재
+      const logEntries = readings
+        .filter(r => beaconMap.has(r.beaconId) && r.rssi > -100)
+        .map(r => {
+          const info = beaconMap.get(r.beaconId);
+          return {
+            beaconId: r.beaconId,
+            x: info.x,
+            y: info.y,
+            rssi: r.rssi,
+            sessionId: String(scannerId),
+          };
+        });
+
+      if (logEntries.length > 0) {
+        BeaconLog.insertMany(logEntries).catch(err => {
+          console.error("❌ BeaconLog 적재 실패:", err.message);
+        });
+      }
+
+      // (2) ScannerReading 적재
+      try {
+        await ScannerReading.create({ 
+          scannerId: String(scannerId), 
+          mapId, 
+          zone: result.zone, 
+          x: result.x, 
+          y: result.y 
+        });
+      } catch (dbErr) {
+        console.error("⚠️ ScannerReading 백그라운드 저장 실패:", dbErr.message);
+      }
+
+      // (3) 혼잡도 재계산 및 발송
+      if (io) {
+        try {
+          const congestion = await getCongestionForMap(mapId);
+          io.to(mapId).emit("congestion_update", { mapId, congestion });
+          io.emit("congestion_update", { mapId, congestion });
+        } catch (err) {
+          console.error("⚠️ 혼잡도 재계산 실패:", err.message);
+        }
       }
     });
+
+  } catch (err) {
+    console.error("❌ /api/location 라우터 치명적 에러:", err);
+    return res.status(500).json({ error: "내부 서버 오류가 발생했습니다." });
   }
-
-  // 혼잡도 집계를 위해 저장 (TTL 5분 자동 삭제)
-  await ScannerReading.create({ scannerId, mapId, zone: result.zone, x: result.x, y: result.y });
-
-  // 🔌 실시간 브로드캐스트 — 여기가 이번에 새로 추가된 핵심 연결부입니다.
-  const io = req.app.get("io");
-  if (io) {
-    // 1) 이 스캐너의 새 추정 위치를 모든 클라이언트에 전파
-    io.emit("location_update", {
-      scannerId,
-      mapId,
-      x: result.x,          // 미터 단위
-      y: result.y,          // 미터 단위
-      zone: result.zone,    // 그리드 셀, 예: "R01C02"
-      confidence: result.confidence,
-      usedBeacons: result.usedBeacons,
-    });
-
-    // 2) 혼잡도도 같이 갱신해서 전파 (요구사항 #6: 실시간 반영)
-    try {
-      const congestion = await getCongestionForMap(mapId);
-      io.emit("congestion_update", { mapId, congestion });
-    } catch (err) {
-      console.error("혼잡도 재계산 실패:", err);
-    }
-  }
-
-  res.json({ status: "ok", scannerId, location: result });
 });
 
-// GET /api/location/congestion/:mapId  → 그리드별 스캐너 수 (최초 로드 시 폴백용)
+// GET /api/location/congestion/:mapId
 router.get("/congestion/:mapId", async (req, res) => {
   try {
     const congestion = await getCongestionForMap(req.params.mapId);

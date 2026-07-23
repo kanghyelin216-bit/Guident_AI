@@ -101,8 +101,8 @@ io.on('connection', (socket) => {
     // 사용자가 특정 지도 레이아웃에 진입 시 룸(Room)에 가입하도록 지원
     socket.on('join_map', (data) => {
         if (data && data.mapId) {
-            socket.join(`map_${data.mapId}`);
-            console.log(`📡 소켓 [${socket.id}]이 지도 룸 [map_${data.mapId}]에 입장했습니다.`);
+            socket.join(data.mapId);
+            console.log(`📡 소켓 [${socket.id}]이 지도 룸 [${data.mapId}]에 입장했습니다.`);
         }
     });
 

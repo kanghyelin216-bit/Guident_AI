@@ -2,14 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import p5 from "p5";
 import { io } from "socket.io-client"; 
 
-// 🟢 [핵심] 라이브러리가 로드되자마자 온전하게 FES를 무력화
+// p5.js Friendly Errors 무력화 (성능 최적화)
 if (typeof window !== 'undefined') {
   window.p5 = p5; 
   p5.disableFriendlyErrors = true;
 }
-
-// Vite 개발 서버 환경에서의 FES 네트워크 노이즈 방지
-p5.disableFriendlyErrors = true;
 
 /* ==========================================================================
    📐 캔버스 및 레이아웃 설정 (1미터 = 45픽셀 규격 일치)
@@ -19,7 +16,10 @@ const CANVAS_WIDTH = 602;
 const CANVAS_HEIGHT = 767;
 const PIXEL_SCALE = 45;
 
-const YOUR_COMPUTER_IP = `${window.location.protocol}//${window.location.hostname}:4000`;
+// 백엔드 Express 서버 주소
+const SERVER_BASE_URL = typeof window !== 'undefined'
+  ? `${window.location.protocol}//${window.location.hostname}:4000`
+  : 'http://localhost:4000';
 
 // 미터 -> 픽셀 변환 연산 (화면 이탈 방지 클램핑 포함)
 function metersToPixels(xM, yM) {
@@ -72,7 +72,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
   useEffect(() => {
     if (socketRef.current) return;
 
-    socketRef.current = io(YOUR_COMPUTER_IP, {
+    socketRef.current = io(SERVER_BASE_URL, {
       transports: ['websocket'],
       upgrade: false,
       forceNew: true,
@@ -80,41 +80,29 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     });
 
     socketRef.current.on('connect', () => {
-      console.log("🌐 [리액트] 중계 웹소켓 서버 연결 성공! ID:", socketRef.current.id);
+      console.log("🌐 [리액트] 웹소켓 연결 성공! Socket ID:", socketRef.current.id);
+      socketRef.current.emit("join_map", { mapId });
     });
 
-    // 🟢 안드로이드 전송 데이터 통합 호환 매핑 루프
+    // 🟢 위치 수신 및 즉시 p5.js 캔버스 변수 연동
     socketRef.current.on('location_update', (data) => {
       if (!data) return;
 
-      console.log("📥 [웹소켓 수신 성공] 서버로부터 전달된 raw 데이터:", data);
-
-      // 대소문자 방어막 구축 (x, y 주소 유연하게 매핑)
       const rawX = typeof data.x === 'number' ? data.x : (typeof data.X === 'number' ? data.X : null);
       const rawY = typeof data.y === 'number' ? data.y : (typeof data.Y === 'number' ? data.Y : null);
 
-      if (rawX === null || rawY === null) {
-        console.log("⚠️ 수신된 좌표가 숫자가 아닙니다. 백엔드 연산 결과 실패 상태일 수 있습니다.");
-        return;
-      }
+      if (rawX === null || rawY === null) return;
 
-      // 🛠️ 수정 구간: 안드로이드 기기 필터링 무력화
-      // 웹 화면 관제 및 테스트 환경 확보를 위해 다른 기기의 신호라도 무시하지 않고 통과시킵니다.
-      /*
-      if (scannerId && data.scannerId && data.scannerId !== scannerId) {
-        console.log(`⚠️ 다른 기기(${data.scannerId})의 위치 신호이므로 현재 뷰어(${scannerId})에서는 무시합니다.`);
-        return;
-      }
-      */
-
-      // 미터 단위를 픽셀 규격으로 변환
       const { x: clampedX, y: clampedY } = metersToPixels(rawX, rawY);
       
-      console.log(`🎯 [파란점 동기화] 미터(${rawX.toFixed(2)}, ${rawY.toFixed(2)}) ➡️ 픽셀(${clampedX}, ${clampedY})`);
-      
-      // 상태값 반영하여 화면의 파란 점을 이동시킴
       setUserPos({ x: clampedX, y: clampedY });
       if (data.zone) setCurrentZone(data.zone);
+
+      // p5.js 인스턴스 변수에 직접 주입하여 프레임 드랍 없는 스무스 이동 구현
+      if (p5Instance.current) {
+        p5Instance.current.userX = clampedX;
+        p5Instance.current.userY = clampedY;
+      }
     });
 
     return () => {
@@ -123,14 +111,14 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
         socketRef.current = null;
       }
     };
-  }, [scannerId]);
+  }, [mapId]);
 
   /* ==========================================================================
-     🚻 [REST API] 초기 시설 로드 인터페이스
+     🚻 [REST API] 초기 시설 정보 로드
      ========================================================================== */
   useEffect(() => {
     let cancelled = false;
-    fetch(`${YOUR_COMPUTER_IP}/api/maps/${mapId}`)
+    fetch(`${SERVER_BASE_URL}/api/maps/${mapId}`)
       .then(res => res.json())
       .then(doc => { 
         if (!cancelled) setFacilities(doc?.facilities || []); 
@@ -142,7 +130,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
   }, [mapId]);
 
   /* ==========================================================================
-     🧭 [A* 알고리즘] 최단 거리 / 혼잡 회피 다이나믹 경로 탐색 엔진
+     🧭 [A* 알고리즘] 최단 거리 / 혼잡 회피 경로 탐색
      ========================================================================== */
   const startNavigation = useCallback(async (facility) => {
     if (!currentZone || !facility) return;
@@ -151,7 +139,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     const targetFacilityId = facility._id || facility.id;
 
     try {
-      const res = await fetch(`${YOUR_COMPUTER_IP}/api/navigation/path`, {
+      const res = await fetch(`${SERVER_BASE_URL}/api/navigation/path`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -168,11 +156,11 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
         return;
       }
       setNavPath(data.path); 
-      setNavMessage(`${facility.label}까지 경로 안내 중${avoidCongestion ? ' (혼잡 회피)' : ''}`);
+      setNavMessage(`${facility.label || '목적지'}까지 경로 안내 중${avoidCongestion ? ' (혼잡 회피)' : ''}`);
       setSelectedArtwork(null);
     } catch (err) {
       setNavPath(null);
-      setNavMessage('경로탐색 서버 요청에 실패했습니다.');
+      setNavMessage('경로 탐색 서버 요청에 실패했습니다.');
     }
   }, [currentZone, mapId, avoidCongestion]);
 
@@ -180,7 +168,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     if (selectedFacility && currentZone) {
       startNavigation(selectedFacility);
     }
-  }, [avoidCongestion, selectedFacility, startNavigation]);
+  }, [avoidCongestion, selectedFacility, startNavigation, currentZone]);
 
   const clearNavigation = () => {
     setNavPath(null);
@@ -189,12 +177,12 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
   };
 
   /* ==========================================================================
-     🔄 p5.js 외부 메모리 상태 동기화 바인딩 사이클
+     🔄 p5.js 데이터 레벨 변수 동기화
      ========================================================================== */
   useEffect(() => {
     if (p5Instance.current) {
-      p5Instance.current.currentX = userPos.x;
-      p5Instance.current.currentY = userPos.y;
+      p5Instance.current.userX = userPos.x;
+      p5Instance.current.userY = userPos.y;
     }
   }, [userPos]);
 
@@ -206,22 +194,24 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
 
   useEffect(() => {
     if (p5Instance.current) {
-      p5Instance.current.navPathPx = navPath ? navPath.map(pt => metersToPixelsRaw(pt.x, pt.y)) : null;
+      p5Instance.current.navPathPx = navPath
+        ? navPath.map(pt => (Array.isArray(pt) ? metersToPixelsRaw(pt[1], pt[0]) : metersToPixelsRaw(pt.x, pt.y)))
+        : null;
     }
   }, [navPath]);
 
   /* ==========================================================================
-     🎨 [p5.js Core Engine]
+     🎨 [p5.js Core Canvas Engine]
      ========================================================================== */
   useEffect(() => {
     let myP5;
     if (canvasRef.current) canvasRef.current.innerHTML = ""; 
 
     const sketch = (p) => {
-      p.currentX = userPos.x;
-      p.currentY = userPos.y;
-      p.facilitiesPx = facilities.map(f => ({ ...f, ...metersToPixelsRaw(f.x, f.y) }));
-      p.navPathPx = navPath ? navPath.map(pt => metersToPixelsRaw(pt.x, pt.y)) : null;
+      p.userX = userPos.x;
+      p.userY = userPos.y;
+      p.facilitiesPx = [];
+      p.navPathPx = null;
 
       p.setup = () => {
         p.createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -232,13 +222,13 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       p.draw = () => {
         p.background(248, 249, 250); 
 
-        if (showGrid){
+        if (showGrid) {
           p.stroke(230); p.strokeWeight(1);
           for (let x = 0; x < p.width; x += 40) p.line(x, 0, x, p.height);
           for (let y = 0; y < p.height; y += 40) p.line(0, y, p.width, y);
         }
 
-        // 맵 오브젝트 렌더링
+        // 맵 구조물 렌더링
         for (let obj of mapObjects) {
           p.push();
           if (obj.type === 'booth') {
@@ -262,7 +252,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
           p.pop(); 
         }
 
-        // 최단/회피 경로 가이드 라인 렌더링
+        // A* 경로 시각화
         if (p.navPathPx && p.navPathPx.length > 1) {
           p.push();
           p.stroke(0, 122, 255);
@@ -274,7 +264,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
           p.pop();
         }
 
-        // 인프라 시설 마커 시각화
+        // 편의시설 마커 시각화
         for (const f of p.facilitiesPx) {
           p.push();
           p.fill(40, 167, 69);
@@ -289,21 +279,22 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
           p.pop();
         }
 
-        // 실시간 사용자 스마트 펄스 마커
-        drawUserMarker(p, p.currentX, p.currentY); 
+        // 실시간 사용자 위치 마커 (파란 펄스 점)
+        drawUserMarker(p, p.userX, p.userY); 
       };
 
       const drawUserMarker = (p, x, y) => {
         p.push();
-        let pulse = p.sin(p.frameCount * 0.05) * 6;
+        let pulse = p.sin(p.frameCount * 0.08) * 8;
+        
         p.fill(0, 122, 255, 40);
         p.noStroke();
-        p.circle(x, y, 24 + pulse); 
+        p.circle(x, y, 26 + pulse); 
 
         p.fill(0, 122, 255);
         p.stroke(255);
-        p.strokeWeight(2);
-        p.circle(x, y, 12); 
+        p.strokeWeight(3);
+        p.circle(x, y, 14); 
         p.pop();
       };
 
@@ -379,7 +370,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
             <div style={styles.textGroup}>
               <h3 style={styles.title}>{selectedFacility.label}</h3>
               <p style={styles.desc}>
-                {currentZone ? `현재 위치(${currentZone})에서 가이드 라인을 생성합니다.` : '위치 인프라 신호를 탐색 중입니다.'}
+                {currentZone ? `현재 위치(${currentZone})에서 경로를 안내합니다.` : '위치 인프라 신호를 탐색 중입니다.'}
               </p>
             </div>
           </div>
