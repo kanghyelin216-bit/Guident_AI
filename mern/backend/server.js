@@ -29,6 +29,7 @@ import beaconRoutes    from "./routes/beacons.js";
 import mapRoutes       from "./routes/maps.js";
 import navRoutes       from "./routes/navigation.js";
 import chatRoutes      from "./routes/chat.js";
+import authRoutes      from "./routes/auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -88,6 +89,7 @@ app.use("/api/beacons",    beaconRoutes);
 app.use("/api/maps",       mapRoutes);
 app.use("/api/navigation", navRoutes);
 app.use("/api/chat",       chatRoutes);
+app.use("/api/auth",       authRoutes);
 
 // 헬스체크 및 인프라 모니터링용 엔드포인트
 app.get("/health", (_, res) => res.json({ status: "ok", timestamp: new Date() }));

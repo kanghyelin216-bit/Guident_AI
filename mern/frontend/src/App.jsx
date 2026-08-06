@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import MapSection from './MapSketch'; 
 import AdminBeaconsSection from './AdminBeacons';
+import AdminLogin, { getAdminToken } from './AdminLogin';
 
 // 접속한 주소를 기준으로 자동으로 서버 주소를 잡음 (팀원끼리 IP 달라도 안 깨짐)
 const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
@@ -328,7 +329,14 @@ function RecommendSection() {
   );
 }
 
-const SECTION_MAP = { map: MapSection, exhibits: ExhibitsSection, chat: ChatSection, recommend: RecommendSection, admin: AdminBeaconsSection };
+/* ── 관리자 접근 게이트: 토큰 없으면 로그인 화면, 있으면 관리자 화면 ── */
+function AdminGate(props) {
+  const [authed, setAuthed] = useState(!!getAdminToken());
+  if (!authed) return <AdminLogin onSuccess={() => setAuthed(true)} />;
+  return <AdminBeaconsSection {...props} />;
+}
+
+const SECTION_MAP = { map: MapSection, exhibits: ExhibitsSection, chat: ChatSection, recommend: RecommendSection, admin: AdminGate };
 
 export default function App() {
   const [activePage, setActivePage] = useState(null);
