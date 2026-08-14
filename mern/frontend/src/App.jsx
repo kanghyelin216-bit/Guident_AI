@@ -51,9 +51,15 @@ const ADMIN_MENU_ITEM = {
 };
 
 const T = {
-  bg: '#FAFBFF', card: '#FFFFFF', border: '#EEF0F6', radius: '18px',
-  shadow: '0 2px 12px rgba(100,120,180,0.08)', shadowMd: '0 4px 20px rgba(100,120,180,0.13)',
-  text: '#2D3250', sub: '#8A90A8', inputBg: '#F2F4FA',
+  bg: '#F8FAFC',        
+  card: '#FFFFFF',      
+  border: '#E2E8F0',    
+  radius: '20px',       
+  shadow: '0 10px 25px -5px rgba(15, 23, 42, 0.08)',   
+  shadowMd: '0 20px 30px -10px rgba(15, 23, 42, 0.12)', 
+  text: '#0F172A',      
+  sub: '#64748B',       
+  inputBg: '#F1F5F9',   
 };
 
 function getCongestionLevel(count) {
