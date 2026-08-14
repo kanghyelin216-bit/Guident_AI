@@ -363,19 +363,21 @@ export default function App() {
   const menuItems = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS;
 
   return (
-    <div style={{
-      width: '100vw',
-      height: '100vh',
-      background: T.bg,
-      overflowY: activePage === 'map' ? 'hidden' : 'auto',
-      display: 'flex',
-      flexDirection: 'column'
-    }}>
+  <div style={{
+    width: '100%',            // 👈 100vw의 스크롤바 때문에 쏠리는 현상 방지
+    minHeight: '100vh',
+    background: T.bg,
+    overflowY: activePage === 'map' ? 'hidden' : 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center'      // 👈 모바일 컨테이너를 화면 중앙으로 딱 잡아줌!
+  }}>
+    {/* 헤더와 메인이 화면 전체 폭을 쓰되 정렬되도록 감싸기 */}
+    <div style={{ width: '100%', maxWidth: activePage === 'map' ? 'none' : 480, display: 'flex', flexDirection: 'column', flex: 1 }}>
       <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} allMenuItems={menuItems} />
 
       <main style={{
         width: '100%',
-        maxWidth: activePage === 'map' ? 'none' : 480,
         margin: '0 auto',
         flex: 1,
         overflowY: activePage === 'map' ? 'auto' : 'visible'
@@ -385,5 +387,6 @@ export default function App() {
           : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
       </main>
     </div>
+  </div>
   );
-}
+};
