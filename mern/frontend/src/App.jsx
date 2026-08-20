@@ -51,15 +51,15 @@ const ADMIN_MENU_ITEM = {
 };
 
 const T = {
-  bg: '#F8FAFC',        
+  bg: '#FAFBFF',         // 조금 더 하얗고 투명한 배경
   card: '#FFFFFF',      
   border: '#E2E8F0',    
   radius: '20px',       
-  shadow: '0 10px 25px -5px rgba(15, 23, 42, 0.08)',   
-  shadowMd: '0 20px 30px -10px rgba(15, 23, 42, 0.12)', 
-  text: '#0F172A',      
-  sub: '#64748B',       
-  inputBg: '#F1F5F9',   
+  shadow: '0 8px 20px -6px rgba(15, 23, 42, 0.05)',   
+  shadowMd: '0 15px 35px -8px rgba(15, 23, 42, 0.12)', 
+  text: '#111827',       // 텍스트 컬러를 아주 조금 더 진하게 (거의 블랙)
+  sub: '#6B7280',       
+  inputBg: '#F3F4F6',   
 };
 
 function getCongestionLevel(count) {
