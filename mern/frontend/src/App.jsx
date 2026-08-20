@@ -102,29 +102,51 @@ function Header({ activePage, onBack, paired, allMenuItems }) {
   return (
     <header style={{
       position: 'sticky', top: 0, zIndex: 20,
-      background: 'rgba(250,251,255,0.85)', backdropFilter: 'blur(12px)',
-      borderBottom: `1px solid ${T.border}`, padding: '14px 18px',
-      display: 'flex', alignItems: 'center', gap: 10,
+      background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)',
+      borderBottom: `1px solid ${T.border}`, padding: '16px 20px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
     }}>
-      {activePage && (
-        <button onClick={onBack} style={{
-          background: T.inputBg, border: 'none', borderRadius: 12,
-          width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: T.text, flexShrink: 0,
-        }}>
-          <ArrowLeft size={17} />
-        </button>
-      )}
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: T.text, lineHeight: 1.2 }}>
-          {activePage ? activeMenu?.label : 'Guidant ✨'}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+        {activePage ? (
+          <button onClick={onBack} style={{
+            background: T.inputBg, border: 'none', borderRadius: 14,
+            width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: T.text, flexShrink: 0,
+          }}>
+            <ArrowLeft size={18} />
+          </button>
+        ) : (
+          // 🟢 [추가] 서비스 로고/아이콘 (심플한 컴퍼스 아이콘 배치)
+          <div style={{ 
+            width: 38, height: 38, borderRadius: 12, 
+            background: 'linear-gradient(135deg, #6BAED6 0%, #74C476 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'white', fontSize: 18
+          }}>
+            <MapPin size={20} />
+          </div>
+        )}
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: T.text, lineHeight: 1.2, letterSpacing: '-0.3px' }}>
+            {activePage ? activeMenu?.label : 'Guidant'} 
+          </div>
+          {/* 🟢 [변경] 전시 가이드 텍스트를 헤더 내부의 별도 배지로 변경 */}
+          {!activePage && (
+            <div style={{ display: 'flex', marginTop: 3 }}>
+              <span style={{ 
+                fontSize: 10, fontWeight: 600, color: T.sub, 
+                background: '#F1F5F9', padding: '1px 6px', borderRadius: 4
+              }}>전시 가이드</span>
+            </div>
+          )}
         </div>
-        {!activePage && <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>전시 가이드</div>}
       </div>
+
       <div style={{
-        fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8, flexShrink: 0,
+        fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 10, flexShrink: 0,
         color: paired ? '#2F9E44' : '#E8590C',
         background: paired ? '#EBFBEE' : '#FFF4E6',
+        boxShadow: 'inset 0 1px 1px rgba(0,0,0,0.03)'
       }}>
         {paired ? '📡 위치 연동됨' : '🔌 위치 미연동'}
       </div>
@@ -135,35 +157,39 @@ function Header({ activePage, onBack, paired, allMenuItems }) {
 /* ── 홈 메뉴 ── */
 function HomeMenu({ items, onNavigate }) {
   return (
-    <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>어떤 기능을 이용하시겠어요? 👀</p>
+    <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <p style={{ fontSize: 14, color: T.sub, marginBottom: 6, fontWeight: 500, letterSpacing: '-0.2px' }}>어떤 기능을 이용하시겠어요? 👀</p>
       {items.map((item) => {
         return (
           <button key={item.id} onClick={() => onNavigate(item.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 14,
-            padding: '16px 18px', background: T.card,
-            border: `1.5px solid ${T.border}`, borderRadius: T.radius,
-            boxShadow: T.shadow, cursor: 'pointer', textAlign: 'left',
-            transition: 'transform 0.12s, box-shadow 0.12s',
+            display: 'flex', alignItems: 'center', gap: 16,
+            padding: '20px 22px', background: T.card,
+            border: 'none', borderRadius: T.radius,
+            boxShadow: T.shadowMd, // 🟢 [변경] 더 풍성한 그림자 적용
+            cursor: 'pointer', textAlign: 'left',
+            transition: 'transform 0.15s, box-shadow 0.15s, background 0.1s',
           }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = T.shadowMd; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = T.shadow; }}
+            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 25px 40px -15px rgba(15, 23, 42, 0.18)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = T.shadowMd; }}
+            onMouseDown={e => { e.currentTarget.style.background = '#F9FAFB'; }}
+            onMouseUp={e => { e.currentTarget.style.background = T.card; }}
           >
-            <div style={{ width: 46, height: 46, borderRadius: 14, flexShrink: 0, background: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+            <div style={{ width: 52, height: 52, borderRadius: 16, flexShrink: 0, background: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
               {item.emoji}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 3 }}>{item.label}</div>
-              <div style={{ fontSize: 12, color: T.sub }}>{item.desc}</div>
+            <div style={{ flex: 1, paddingRight: 4 }}>
+              {/* 🟢 [변경] 라벨 강조 */}
+              <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 5, letterSpacing: '-0.3px' }}>{item.label}</div>
+              {/* 🟢 [변경] 설명의 폰트 사이즈를 줄여 위계를 명확히 */}
+              <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.4, maxWidth: '90%' }}>{item.desc}</div>
             </div>
-            <div style={{ color: '#C8CEDE', fontSize: 20, fontWeight: 300 }}>›</div>
+            <div style={{ color: '#D1D5DB', fontSize: 22, fontWeight: 200, paddingLeft: 4 }}>›</div>
           </button>
         );
       })}
     </div>
   );
 }
-
 /* ── 주변 전시물 ── */
 function ExhibitsSection() {
   const congestion = useCongestion();
