@@ -284,20 +284,29 @@ function ChatSection({ scannerId }) {
     };
   }, [scannerId]);
 
-  const handleSend = async (textToSend) => {
+const handleSend = async (textToSend) => {
     const userText = textToSend || chatMessage;
     if (!userText.trim()) return;
-    setMessages(prev => [...prev, { id: Date.now(), sender: 'user', text: userText }]);
+
+    // 🟢 Date.now() 대신 random을 조합하여 완전히 고유한 ID 생성
+    const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const loadId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    setMessages(prev => [...prev, { id: userMsgId, sender: 'user', text: userText }]);
     setChatMessage('');
-    const loadId = Date.now() + 1;
+    
     setMessages(prev => [...prev, { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' }]);
+
     try {
       const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userText, scannerId: getOrCreateWebScannerId() }),
       });
       const data = await res.json();
-      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: data.reply } : m));
+      
+      // 백엔드 응답(data.reply)으로 로딩 메시지 교체
+      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: data.reply || '응답을 받지 못했습니다.' } : m));
     } catch {
       setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: '서버와 연결이 원활하지 않습니다. 통합 백엔드가 4000포트에서 작동 중인지 확인하세요!' } : m));
     }
