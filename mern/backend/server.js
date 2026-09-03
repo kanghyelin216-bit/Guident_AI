@@ -14,6 +14,8 @@
 
 // 1. 최상단에서 환경 변수를 즉시 로드 (라우터들이 import 되기 전에 무조건 실행됨)
 import "dotenv/config";
+import dns from "dns";
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 import express from "express";
 import cors from "cors";
