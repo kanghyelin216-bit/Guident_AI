@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import { Beacon, ScannerReading } from "../models/index.js";
 import BeaconLog from "../models/BeaconLog.js";
 import { estimateLocation } from "../modules/location/index.js";
+import { checkProactiveTrigger } from "../services/proactiveTrigger.js";
 
 const router = Router();
 
@@ -113,6 +114,8 @@ router.post("/", async (req, res) => {
 
     // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 무거운 혼잡도 연산은 응답 후 비동기 처리
     setImmediate(async () => {
+      const io = req.app.get("io");
+      
       // (1) 비콘 로그 적재
       const logEntries = readings
         .filter(r => beaconMap.has(r.beaconId) && r.rssi > -100)
@@ -152,6 +155,17 @@ router.post("/", async (req, res) => {
           const congestion = await getCongestionForMap(mapId);
           io.to(mapId).emit("congestion_update", { mapId, congestion });
           io.emit("congestion_update", { mapId, congestion });
+          
+          // 🆕 AI 선제적 트리거 체크 (비동기, 응답 지연에 영향 없음)
+          const isCongested = (congestion[result.zone] || 0) >= 3; // 임계값은 상황에 맞게 조정
+          checkProactiveTrigger({
+            io,
+            mapId,
+            scannerId,
+            zone: result.zone,
+            isCongested,
+          });
+
         } catch (err) {
           console.error("⚠️ 혼잡도 재계산 실패:", err.message);
         }

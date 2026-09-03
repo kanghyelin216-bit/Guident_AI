@@ -5,9 +5,8 @@ const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production'
   ? window.location.origin 
   : (window.location.port === '5173' || window.location.port === '3000'
       ? `${window.location.protocol}//${window.location.hostname}:4000`
-      : 'http://192.168.219.104:4000');
+      : 'http://192.168.219.113:4000');
 
-// 🔐 관리자 토큰 자동 처리 authFetch 래퍼
 async function authFetch(url, options = {}) {
   const token = getAdminToken();
   const res = await fetch(url, {
@@ -37,6 +36,18 @@ const btnStyle = (bg, color = 'white') => ({
   padding: '9px 14px', borderRadius: 10, border: 'none', background: bg, color, fontSize: 13, fontWeight: 600, cursor: 'pointer',
 });
 
+function ErrorBanner({ message }) {
+  if (!message) return null;
+  return (
+    <div style={{
+      background: '#FEF0F5', border: `1px solid ${T.danger}`, color: T.danger,
+      borderRadius: 10, padding: '10px 14px', fontSize: 12.5, fontWeight: 500,
+    }}>
+      ⚠️ {message}
+    </div>
+  );
+}
+
 function MapUploadForm({ onUploaded }) {
   const [name, setName] = useState('');
   const [widthM, setWidthM] = useState('8');
@@ -56,7 +67,6 @@ function MapUploadForm({ onUploaded }) {
       form.append('cellSizeM', '1');
       form.append('image', file);
 
-      // 1️⃣ authFetch 전환 (지도 업로드 POST)
       const res = await authFetch(`${YOUR_COMPUTER_IP}/api/maps`, { method: 'POST', body: form });
       if (!res.ok) throw new Error('업로드 실패');
       const doc = await res.json();
@@ -95,6 +105,11 @@ export default function AdminBeaconsSection() {
   const [facilityForm, setFacilityForm] = useState({ id: '', label: '', icon: 'toilet' });
   const [error, setError] = useState('');
   const imgRef = useRef(null);
+
+  const handleLogout = () => {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    window.location.reload();
+  };
 
   const loadMaps = useCallback(async () => {
     const res = await fetch(`${YOUR_COMPUTER_IP}/api/maps`);
@@ -139,7 +154,6 @@ export default function AdminBeaconsSection() {
     if (!formState.beaconId) { setError('beaconId를 입력하세요.'); return; }
 
     try {
-      // 2️⃣ authFetch 전환 (비콘 등록 POST)
       const res = await authFetch(`${YOUR_COMPUTER_IP}/api/beacons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -155,26 +169,35 @@ export default function AdminBeaconsSection() {
       if (!res.ok) throw new Error('등록 실패 (중복 beaconId 확인)');
       setFormState({ beaconId: '', major: '', minor: '', txPower: -59, label: '' });
       setPendingClick(null);
+      setError('');
       await loadBeacons(selectedMapId);
     } catch (err) { setError(err.message); }
   };
 
   const handleToggleVisible = async (beacon) => {
-    // 3️⃣ authFetch 전환 (비콘 가시성 토글 PATCH)
-    await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${beacon._id}/visible`, { method: 'PATCH' });
-    loadBeacons(selectedMapId);
+    try {
+      await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${beacon._id}/visible`, { method: 'PATCH' });
+      await loadBeacons(selectedMapId);
+    } catch (err) { setError(err.message); }
   };
 
   const handleDelete = async (beacon) => {
     if (!window.confirm(`비콘 "${beacon.beaconId}"을(를) 삭제할까요?`)) return;
-    // 4️⃣ authFetch 전환 (비콘 삭제 DELETE)
-    await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${beacon._id}`, { method: 'DELETE' });
-    loadBeacons(selectedMapId);
+    try {
+      await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${beacon._id}`, { method: 'DELETE' });
+      await loadBeacons(selectedMapId);
+    } catch (err) { setError(err.message); }
   };
 
   const handleRegisterFacility = async () => {
     if (!pendingClick) { setError('지도를 먼저 클릭하세요.'); return; }
     if (!facilityForm.id || !facilityForm.label) { setError('id와 이름을 모두 입력하세요.'); return; }
+    if (!selectedMap) { setError('지도 정보를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.'); return; }
+
+    if ((selectedMap.facilities || []).some(f => f.id === facilityForm.id)) {
+      setError(`시설 id "${facilityForm.id}"가 이미 존재합니다. 다른 id를 사용하세요.`);
+      return;
+    }
 
     const newFacility = {
       id: facilityForm.id,
@@ -183,10 +206,9 @@ export default function AdminBeaconsSection() {
       x: Number(pendingClick.xM.toFixed(2)),
       y: Number(pendingClick.yM.toFixed(2)),
     };
-    const nextFacilities = [...(selectedMap.facilities || []), newFacility];
+    const nextFacilities = [...(selectedMap?.facilities || []), newFacility];
 
     try {
-      // 5️⃣ authFetch 전환 (시설 목록 업데이트 PUT)
       const res = await authFetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMapId}/facilities`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -195,21 +217,25 @@ export default function AdminBeaconsSection() {
       if (!res.ok) throw new Error('시설 등록 실패');
       setFacilityForm({ id: '', label: '', icon: 'toilet' });
       setPendingClick(null);
+      setError('');
       await loadSelectedMapDetail(selectedMapId);
     } catch (err) { setError(err.message); }
   };
 
   const handleDeleteFacility = async (facilityId) => {
     if (!window.confirm(`시설 "${facilityId}"을(를) 삭제할까요?`)) return;
+    if (!selectedMap) return;
     const nextFacilities = (selectedMap.facilities || []).filter(f => f.id !== facilityId);
-    
-    // 6️⃣ authFetch 전환 (시설 삭제 반영 PUT)
-    await authFetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMapId}/facilities`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ facilities: nextFacilities }),
-    });
-    loadSelectedMapDetail(selectedMapId);
+
+    try {
+      const res = await authFetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMapId}/facilities`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facilities: nextFacilities }),
+      });
+      if (!res.ok) throw new Error('시설 삭제 실패');
+      await loadSelectedMapDetail(selectedMapId);
+    } catch (err) { setError(err.message); }
   };
 
   const meterToDisplayPx = (xM, yM) => {
@@ -225,10 +251,31 @@ export default function AdminBeaconsSection() {
 
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720, margin: '0 auto' }}>
+      {/* 관리자 헤더 영역 (제목 & 로그아웃 버튼) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: T.card, padding: '12px 16px', borderRadius: T.radius, border: `1.5px solid ${T.border}`, boxShadow: T.shadow }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: T.text }}>⚙️ 관리자 대시보드</div>
+        <button
+          onClick={handleLogout}
+          style={{
+            ...btnStyle('transparent', T.danger),
+            border: `1px solid ${T.danger}`,
+            padding: '6px 12px',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4
+          }}
+        >
+          🚪 로그아웃
+        </button>
+      </div>
+
       <div style={{ display: 'flex', gap: 6, background: T.inputBg, padding: 4, borderRadius: 12 }}>
         <button onClick={() => { setTab('beacon'); setPendingClick(null); setError(''); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'beacon' ? T.card : 'transparent', color: tab === 'beacon' ? T.text : T.sub, boxShadow: tab === 'beacon' ? T.shadow : 'none' }}>📡 비콘 좌표 등록</button>
         <button onClick={() => { setTab('facility'); setPendingClick(null); setError(''); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'facility' ? T.card : 'transparent', color: tab === 'facility' ? T.text : T.sub, boxShadow: tab === 'facility' ? T.shadow : 'none' }}>🚻 시설(화장실·출구) 등록</button>
       </div>
+
+      <ErrorBanner message={error} />
 
       {maps.length === 0 ? (
         <MapUploadForm onUploaded={(doc) => { setMaps([doc]); setSelectedMapId(doc._id); }} />
@@ -256,16 +303,102 @@ export default function AdminBeaconsSection() {
           )}
 
           {tab === 'beacon' ? (
-            <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
-              <input style={inputStyle} placeholder="비콘 ID (예: A1)" value={formState.beaconId} onChange={e => setFormState(s => ({ ...s, beaconId: e.target.value }))} />
-              <button style={{ ...btnStyle(T.accent), marginTop: 8 }} onClick={handleRegister}>비콘 등록</button>
-            </div>
+            <>
+              <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
+                <input style={inputStyle} placeholder="비콘 ID (예: A1)" value={formState.beaconId} onChange={e => setFormState(s => ({ ...s, beaconId: e.target.value }))} />
+                <button style={{ ...btnStyle(T.accent), marginTop: 8, width: '100%' }} onClick={handleRegister}>비콘 등록</button>
+                {!pendingClick && (
+                  <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>💡 위 지도를 클릭해 좌표를 먼저 지정하세요.</div>
+                )}
+              </div>
+
+              <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>
+                  등록된 비콘 ({beacons.length}개)
+                </div>
+                {beacons.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: T.sub }}>등록된 비콘이 없습니다.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {beacons.map(b => (
+                      <div key={b._id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 12px', borderRadius: 10, background: T.inputBg,
+                      }}>
+                        <div style={{
+                          width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+                          background: b.visible ? T.accent : '#CBD3E6',
+                        }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{b.beaconId}</div>
+                          <div style={{ fontSize: 11, color: T.sub }}>
+                            x: {b.x?.toFixed?.(2) ?? b.x} · y: {b.y?.toFixed?.(2) ?? b.y} · TX: {b.txPower}dBm
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleToggleVisible(b)}
+                          style={{ ...btnStyle(b.visible ? T.ok : '#CBD3E6', b.visible ? 'white' : T.text), padding: '6px 10px', fontSize: 11.5 }}
+                        >
+                          {b.visible ? '표시중' : '숨김'}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b)}
+                          style={{ ...btnStyle('transparent', T.danger), padding: '6px 10px', fontSize: 11.5, border: `1px solid ${T.danger}` }}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           ) : (
-            <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
-              <input style={inputStyle} placeholder="시설 id (예: toilet_1)" value={facilityForm.id} onChange={e => setFacilityForm(s => ({ ...s, id: e.target.value }))} />
-              <input style={{ ...inputStyle, marginTop: 8 }} placeholder="시설 이름 (예: 화장실)" value={facilityForm.label} onChange={e => setFacilityForm(s => ({ ...s, label: e.target.value }))} />
-              <button style={{ ...btnStyle(T.ok), marginTop: 8 }} onClick={handleRegisterFacility}>시설 등록</button>
-            </div>
+            <>
+              <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
+                <input style={inputStyle} placeholder="시설 id (예: toilet_1)" value={facilityForm.id} onChange={e => setFacilityForm(s => ({ ...s, id: e.target.value }))} />
+                <input style={{ ...inputStyle, marginTop: 8 }} placeholder="시설 이름 (예: 화장실)" value={facilityForm.label} onChange={e => setFacilityForm(s => ({ ...s, label: e.target.value }))} />
+                <button style={{ ...btnStyle(T.ok), marginTop: 8, width: '100%' }} onClick={handleRegisterFacility}>시설 등록</button>
+                {!pendingClick && (
+                  <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>💡 위 지도를 클릭해 좌표를 먼저 지정하세요.</div>
+                )}
+              </div>
+
+              <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>
+                  등록된 시설 ({(selectedMap?.facilities || []).length}개)
+                </div>
+                {(selectedMap?.facilities || []).length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: T.sub }}>등록된 시설이 없습니다.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {(selectedMap?.facilities || []).map(f => (
+                      <div key={f.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 12px', borderRadius: 10, background: T.inputBg,
+                      }}>
+                        <div style={{
+                          width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                          background: T.ok, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
+                        }}>🚻</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{f.label}</div>
+                          <div style={{ fontSize: 11, color: T.sub }}>
+                            id: {f.id} · x: {f.x} · y: {f.y}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteFacility(f.id)}
+                          style={{ ...btnStyle('transparent', T.danger), padding: '6px 10px', fontSize: 11.5, border: `1px solid ${T.danger}` }}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </>
       )}

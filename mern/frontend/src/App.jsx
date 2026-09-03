@@ -203,12 +203,54 @@ function ExhibitsSection() {
 }
 
 /* ── AI 도우미 ── */
-function ChatSection() {
+function ChatSection({ scannerId }) {
   const [chatMessage, setChatMessage] = useState('');
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [messages, setMessages] = useState([
     { id: 1, sender: 'bot', text: '안녕하세요! 전시물에 대해 궁금한 점을 무엇이든 물어보세요 😊' }
   ]);
+
+  // 🆕 (1) 마운트 시 과거 대화 이력 로드 (포맷 매칭: sender, text)
+  useEffect(() => {
+    if (!scannerId) return;
+    fetch(`${SERVER_BASE_URL}/api/chat/${scannerId}`)
+      .then((res) => res.json())
+      .then((history) => {
+        if (Array.isArray(history)) {
+          setMessages(prev => [
+            prev[0], // 인사말 유지
+            ...history.map((h, i) => ({
+              id: Date.now() + i, // 고유 id 부여
+              sender: h.role === 'user' ? 'user' : 'bot',
+              text: h.message,
+              zone: h.zone,
+            }))
+          ]);
+        }
+      })
+      .catch((err) => console.error("히스토리 로드 실패:", err));
+  }, [scannerId]);
+
+  // 🆕 (2) AI 선제적 메시지 수신
+  useEffect(() => {
+    const socket = io(SERVER_BASE_URL, { transports: ["websocket"] });
+    socket.emit("join_map", { mapId: CURRENT_MAP_ID }); // 객체 포맷 유지
+
+    const handler = (payload) => {
+      if (!payload || payload.scannerId !== scannerId) return; // 본인 것만 반영
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), sender: 'bot', text: payload.message, zone: payload.zone },
+      ]);
+    };
+    
+    socket.on("proactive_message", handler);
+    
+    return () => {
+      socket.off("proactive_message", handler);
+      socket.disconnect();
+    };
+  }, [scannerId]);
 
   const handleSend = async (textToSend) => {
     const userText = textToSend || chatMessage;

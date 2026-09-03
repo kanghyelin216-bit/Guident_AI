@@ -1,3 +1,4 @@
+// AdminLogin.jsx
 import { useState } from 'react';
 
 const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
@@ -14,6 +15,11 @@ export const ADMIN_TOKEN_KEY = 'guidant_admin_token';
 
 export function getAdminToken() {
   return localStorage.getItem(ADMIN_TOKEN_KEY);
+}
+
+// 🔑 로그아웃용 토큰 파기 헬퍼 함수 추가
+export function clearAdminToken() {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 export default function AdminLogin({ onSuccess }) {
