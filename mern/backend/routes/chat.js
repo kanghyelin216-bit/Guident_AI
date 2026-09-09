@@ -50,7 +50,7 @@ router.post("/", async (req, res) => {
         { role: "system", content: systemInstruction },
         ...formattedHistory
       ],
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       temperature: 0.7, // 친근하고 풍부한 표현을 위해 약간 올림
       max_tokens: 500,
     });
