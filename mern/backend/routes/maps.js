@@ -39,6 +39,34 @@ router.post("/", adminAuth, upload.single("image"), async (req, res) => {
   res.json(doc);
 });
 
+// 🆕 지도 메타데이터(이름 / 가로·세로 크기 / 셀 크기) 수정 — 이미지 재업로드는 선택사항 — 관리자만
+// 기존엔 이 라우트 자체가 없어서 지도 크기를 한 번 잘못 입력하면 삭제 후 재업로드밖에 방법이 없었음
+router.put("/:id", adminAuth, upload.single("image"), async (req, res) => {
+  try {
+    const { name, widthM, heightM, cellSizeM } = req.body;
+    const update = {};
+
+    if (name !== undefined && name !== "") update.name = name;
+    if (widthM !== undefined && widthM !== "") update.widthM = Number(widthM);
+    if (heightM !== undefined && heightM !== "") update.heightM = Number(heightM);
+    if (cellSizeM !== undefined && cellSizeM !== "") update.cellSizeM = Number(cellSizeM);
+
+    // 새 이미지 파일을 같이 올렸을 때만 imageUrl 교체 (안 올리면 기존 이미지 유지)
+    if (req.file) update.imageUrl = `/uploads/${req.file.filename}`;
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ error: "수정할 값이 없습니다." });
+    }
+
+    const doc = await Map.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!doc) return res.status(404).json({ error: "해당 지도를 찾을 수 없습니다." });
+
+    res.json(doc);
+  } catch (err) {
+    res.status(500).json({ error: "지도 수정 실패: " + err.message });
+  }
+});
+
 // wallGrid 업데이트 — 관리자만
 router.put("/:id/walls", adminAuth, async (req, res) => {
 

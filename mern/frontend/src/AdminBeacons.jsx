@@ -5,8 +5,9 @@ const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production'
   ? window.location.origin 
   : (window.location.port === '5173' || window.location.port === '3000'
       ? `${window.location.protocol}//${window.location.hostname}:4000`
-      : 'http://192.168.219.113:4000');
+      : 'http://192.168.219.104:4000');
 
+// 🔐 관리자 토큰 자동 처리 authFetch 래퍼
 async function authFetch(url, options = {}) {
   const token = getAdminToken();
   const res = await fetch(url, {
@@ -24,7 +25,7 @@ async function authFetch(url, options = {}) {
 const T = {
   bg: '#FAFBFF', card: '#FFFFFF', border: '#EEF0F6', radius: '14px',
   shadow: '0 2px 12px rgba(100,120,180,0.08)', text: '#2D3250', sub: '#8A90A8',
-  inputBg: '#F2F4FA', accent: '#6BAED6', danger: '#F768A1', ok: '#74C476',
+  inputBg: '#F2F4FA', accent: '#6BAED6', danger: '#F768A1', ok: '#74C476', warn: '#FDAE6B',
 };
 
 const inputStyle = {
@@ -93,6 +94,92 @@ function MapUploadForm({ onUploaded }) {
   );
 }
 
+// 🆕 지도 이름 / 가로·세로 크기 수정 폼
+function MapEditForm({ selectedMap, onSaved, setError }) {
+  const [form, setForm] = useState({ name: '', widthM: '', heightM: '' });
+  const [newImage, setNewImage] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (selectedMap) {
+      setForm({ name: selectedMap.name || '', widthM: String(selectedMap.widthM ?? ''), heightM: String(selectedMap.heightM ?? '') });
+      setNewImage(null);
+    }
+  }, [selectedMap?._id]);
+
+  if (!selectedMap) return null;
+
+  const handleSave = async () => {
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.append('name', form.name);
+      body.append('widthM', form.widthM);
+      body.append('heightM', form.heightM);
+      if (newImage) body.append('image', newImage);
+
+      const res = await authFetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMap._id}`, {
+        method: 'PUT',
+        body, // FormData라 Content-Type 헤더는 브라우저가 자동 설정
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || '지도 정보 수정 실패');
+      }
+      await onSaved();
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>✏️ 지도 정보 수정 (이름 · 가로/세로)</div>
+        <span style={{ color: T.sub, fontSize: 12 }}>{open ? '접기 ▲' : '펼치기 ▼'}</span>
+      </div>
+
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+          <input
+            style={inputStyle} placeholder="지도 이름"
+            value={form.name} onChange={e => setForm(s => ({ ...s, name: e.target.value }))}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              style={inputStyle} type="number" placeholder="가로(m)"
+              value={form.widthM} onChange={e => setForm(s => ({ ...s, widthM: e.target.value }))}
+            />
+            <input
+              style={inputStyle} type="number" placeholder="세로(m)"
+              value={form.heightM} onChange={e => setForm(s => ({ ...s, heightM: e.target.value }))}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>
+              지도 이미지 교체 (선택사항 — 안 고르면 기존 이미지 유지)
+            </div>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setNewImage(e.target.files?.[0] || null)} />
+          </div>
+          <div style={{ fontSize: 11, color: T.warn }}>
+            ⚠️ 가로/세로를 바꾸면 기존에 등록된 비콘·시설 좌표는 그대로 유지되지만, 화면상 위치(비율)가 달라질 수 있습니다. 필요하면 비콘 목록에서 "위치 수정"으로 다시 맞춰주세요.
+          </div>
+          <button style={btnStyle(T.ok)} onClick={handleSave} disabled={busy}>
+            {busy ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminBeaconsSection() {
   const [tab, setTab] = useState('beacon');
   const [maps, setMaps] = useState([]);
@@ -106,10 +193,9 @@ export default function AdminBeaconsSection() {
   const [error, setError] = useState('');
   const imgRef = useRef(null);
 
-  const handleLogout = () => {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-    window.location.reload();
-  };
+  // 🆕 비콘 위치 수정 모드 상태
+  const [editingBeacon, setEditingBeacon] = useState(null);       // 수정 중인 비콘 객체 (없으면 null)
+  const [beaconMovePreview, setBeaconMovePreview] = useState(null); // 새로 클릭한 좌표 미리보기
 
   const loadMaps = useCallback(async () => {
     const res = await fetch(`${YOUR_COMPUTER_IP}/api/maps`);
@@ -136,6 +222,8 @@ export default function AdminBeaconsSection() {
     loadBeacons(selectedMapId);
     loadSelectedMapDetail(selectedMapId);
     setPendingClick(null);
+    setEditingBeacon(null);        // 🆕 지도 바뀌면 편집모드 초기화
+    setBeaconMovePreview(null);
   }, [selectedMapId, loadBeacons, loadSelectedMapDetail]);
 
   const handleMapClick = (e) => {
@@ -145,6 +233,13 @@ export default function AdminBeaconsSection() {
     const pxY = e.clientY - rect.top;
     const xM = (pxX / rect.width) * selectedMap.widthM;
     const yM = (pxY / rect.height) * selectedMap.heightM;
+
+    // 🆕 비콘 위치 수정 모드일 땐 일반 등록용 pendingClick이 아니라 이동 미리보기에 저장
+    if (editingBeacon) {
+      setBeaconMovePreview({ xM, yM, pxX, pxY });
+      return;
+    }
+
     setPendingClick({ xM, yM, pxX, pxY });
     setError('');
   };
@@ -185,6 +280,44 @@ export default function AdminBeaconsSection() {
     if (!window.confirm(`비콘 "${beacon.beaconId}"을(를) 삭제할까요?`)) return;
     try {
       await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${beacon._id}`, { method: 'DELETE' });
+      if (editingBeacon?._id === beacon._id) { setEditingBeacon(null); setBeaconMovePreview(null); }
+      await loadBeacons(selectedMapId);
+    } catch (err) { setError(err.message); }
+  };
+
+  // 🆕 "위치 수정" 버튼 — 편집 모드 진입
+  const handleStartEditPosition = (beacon) => {
+    setEditingBeacon(beacon);
+    setBeaconMovePreview(null);
+    setPendingClick(null);
+    setError('');
+  };
+
+  // 🆕 편집 취소
+  const handleCancelEditPosition = () => {
+    setEditingBeacon(null);
+    setBeaconMovePreview(null);
+  };
+
+  // 🆕 새 위치 저장 — 기존 beacons.js의 PUT /:id 재사용
+  const handleSaveBeaconPosition = async () => {
+    if (!editingBeacon || !beaconMovePreview) {
+      setError('지도를 클릭해 새 위치를 먼저 지정하세요.');
+      return;
+    }
+    try {
+      const res = await authFetch(`${YOUR_COMPUTER_IP}/api/beacons/${editingBeacon._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          x: Number(beaconMovePreview.xM.toFixed(2)),
+          y: Number(beaconMovePreview.yM.toFixed(2)),
+        }),
+      });
+      if (!res.ok) throw new Error('위치 저장 실패');
+      setEditingBeacon(null);
+      setBeaconMovePreview(null);
+      setError('');
       await loadBeacons(selectedMapId);
     } catch (err) { setError(err.message); }
   };
@@ -251,28 +384,9 @@ export default function AdminBeaconsSection() {
 
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720, margin: '0 auto' }}>
-      {/* 관리자 헤더 영역 (제목 & 로그아웃 버튼) */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: T.card, padding: '12px 16px', borderRadius: T.radius, border: `1.5px solid ${T.border}`, boxShadow: T.shadow }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: T.text }}>⚙️ 관리자 대시보드</div>
-        <button
-          onClick={handleLogout}
-          style={{
-            ...btnStyle('transparent', T.danger),
-            border: `1px solid ${T.danger}`,
-            padding: '6px 12px',
-            fontSize: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          🚪 로그아웃
-        </button>
-      </div>
-
       <div style={{ display: 'flex', gap: 6, background: T.inputBg, padding: 4, borderRadius: 12 }}>
-        <button onClick={() => { setTab('beacon'); setPendingClick(null); setError(''); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'beacon' ? T.card : 'transparent', color: tab === 'beacon' ? T.text : T.sub, boxShadow: tab === 'beacon' ? T.shadow : 'none' }}>📡 비콘 좌표 등록</button>
-        <button onClick={() => { setTab('facility'); setPendingClick(null); setError(''); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'facility' ? T.card : 'transparent', color: tab === 'facility' ? T.text : T.sub, boxShadow: tab === 'facility' ? T.shadow : 'none' }}>🚻 시설(화장실·출구) 등록</button>
+        <button onClick={() => { setTab('beacon'); setPendingClick(null); setError(''); setEditingBeacon(null); setBeaconMovePreview(null); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'beacon' ? T.card : 'transparent', color: tab === 'beacon' ? T.text : T.sub, boxShadow: tab === 'beacon' ? T.shadow : 'none' }}>📡 비콘 좌표 등록</button>
+        <button onClick={() => { setTab('facility'); setPendingClick(null); setError(''); setEditingBeacon(null); setBeaconMovePreview(null); }} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: tab === 'facility' ? T.card : 'transparent', color: tab === 'facility' ? T.text : T.sub, boxShadow: tab === 'facility' ? T.shadow : 'none' }}>🚻 시설(화장실·출구) 등록</button>
       </div>
 
       <ErrorBanner message={error} />
@@ -287,18 +401,63 @@ export default function AdminBeaconsSection() {
             </select>
           </div>
 
+          {/* 🆕 지도 정보(이름/가로/세로) 수정 폼 */}
+          <MapEditForm
+            selectedMap={selectedMap}
+            setError={setError}
+            onSaved={async () => {
+              await loadSelectedMapDetail(selectedMapId);
+              await loadMaps();
+            }}
+          />
+
+          {/* 🆕 비콘 위치 수정 모드 안내 배너 */}
+          {editingBeacon && (
+            <div style={{
+              background: '#FEF9EC', border: `1px solid ${T.warn}`, borderRadius: 10,
+              padding: '10px 14px', fontSize: 12.5, color: '#92600A',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+            }}>
+              <span>📍 <b>{editingBeacon.beaconId}</b> 위치 수정 중 — 아래 지도를 클릭해 새 위치를 지정하세요.</span>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button style={{ ...btnStyle(T.ok), padding: '5px 10px', fontSize: 11.5 }} onClick={handleSaveBeaconPosition}>저장</button>
+                <button style={{ ...btnStyle('#E9ECEF', T.text), padding: '5px 10px', fontSize: 11.5 }} onClick={handleCancelEditPosition}>취소</button>
+              </div>
+            </div>
+          )}
+
           {selectedMap && (
             <div onClick={handleMapClick} style={{ position: 'relative', width: '100%', borderRadius: T.radius, overflow: 'hidden', border: `1.5px solid ${T.border}`, cursor: 'crosshair', lineHeight: 0 }}>
               <img ref={imgRef} src={`${YOUR_COMPUTER_IP}${selectedMap.imageUrl}`} alt={selectedMap.name} style={{ width: '100%', display: 'block', userSelect: 'none' }} draggable={false} />
+
               {tab === 'beacon' && beacons.map(b => {
+                const isEditing = editingBeacon?._id === b._id;
                 const { left, top } = meterToDisplayPx(b.x, b.y);
-                return (<div key={b._id} style={{ position: 'absolute', left, top, transform: 'translate(-50%, -50%)', width: 14, height: 14, borderRadius: '50%', background: b.visible ? T.accent : '#CBD3E6', border: '2px solid white' }} />);
+                return (
+                  <div key={b._id} style={{
+                    position: 'absolute', left, top, transform: 'translate(-50%, -50%)',
+                    width: isEditing ? 10 : 14, height: isEditing ? 10 : 14, borderRadius: '50%',
+                    background: isEditing ? 'rgba(107,174,214,0.35)' : (b.visible ? T.accent : '#CBD3E6'),
+                    border: '2px solid white',
+                  }} />
+                );
               })}
+
+              {/* 🆕 비콘 새 위치 미리보기 마커 (주황색) */}
+              {editingBeacon && beaconMovePreview && (
+                <div style={{
+                  position: 'absolute', left: beaconMovePreview.pxX, top: beaconMovePreview.pxY,
+                  transform: 'translate(-50%, -50%)', width: 18, height: 18, borderRadius: '50%',
+                  background: T.warn, border: '2px solid white', boxShadow: '0 0 0 3px rgba(253,174,107,0.35)',
+                }} />
+              )}
+
               {tab === 'facility' && (selectedMap.facilities || []).map(f => {
                 const { left, top } = meterToDisplayPx(f.x, f.y);
                 return (<div key={f.id} style={{ position: 'absolute', left, top, transform: 'translate(-50%, -50%)', width: 22, height: 22, borderRadius: '50%', background: T.ok, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, border: '2px solid white' }}>🚻</div>);
               })}
-              {pendingClick && (<div style={{ position: 'absolute', left: pendingClick.pxX, top: pendingClick.pxY, transform: 'translate(-50%, -50%)', width: 16, height: 16, borderRadius: '50%', background: T.danger, border: '2px solid white' }} />)}
+
+              {!editingBeacon && pendingClick && (<div style={{ position: 'absolute', left: pendingClick.pxX, top: pendingClick.pxY, transform: 'translate(-50%, -50%)', width: 16, height: 16, borderRadius: '50%', background: T.danger, border: '2px solid white' }} />)}
             </div>
           )}
 
@@ -306,8 +465,8 @@ export default function AdminBeaconsSection() {
             <>
               <div style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.radius, padding: 16 }}>
                 <input style={inputStyle} placeholder="비콘 ID (예: A1)" value={formState.beaconId} onChange={e => setFormState(s => ({ ...s, beaconId: e.target.value }))} />
-                <button style={{ ...btnStyle(T.accent), marginTop: 8, width: '100%' }} onClick={handleRegister}>비콘 등록</button>
-                {!pendingClick && (
+                <button style={{ ...btnStyle(T.accent), marginTop: 8, width: '100%' }} onClick={handleRegister} disabled={!!editingBeacon}>비콘 등록</button>
+                {!pendingClick && !editingBeacon && (
                   <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>💡 위 지도를 클릭해 좌표를 먼저 지정하세요.</div>
                 )}
               </div>
@@ -323,7 +482,9 @@ export default function AdminBeaconsSection() {
                     {beacons.map(b => (
                       <div key={b._id} style={{
                         display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '9px 12px', borderRadius: 10, background: T.inputBg,
+                        padding: '9px 12px', borderRadius: 10,
+                        background: editingBeacon?._id === b._id ? '#FEF9EC' : T.inputBg,
+                        border: editingBeacon?._id === b._id ? `1px solid ${T.warn}` : '1px solid transparent',
                       }}>
                         <div style={{
                           width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
@@ -335,6 +496,13 @@ export default function AdminBeaconsSection() {
                             x: {b.x?.toFixed?.(2) ?? b.x} · y: {b.y?.toFixed?.(2) ?? b.y} · TX: {b.txPower}dBm
                           </div>
                         </div>
+                        {/* 🆕 위치 수정 버튼 */}
+                        <button
+                          onClick={() => handleStartEditPosition(b)}
+                          style={{ ...btnStyle('#E9ECEF', T.text), padding: '6px 10px', fontSize: 11.5 }}
+                        >
+                          위치 수정
+                        </button>
                         <button
                           onClick={() => handleToggleVisible(b)}
                           style={{ ...btnStyle(b.visible ? T.ok : '#CBD3E6', b.visible ? 'white' : T.text), padding: '6px 10px', fontSize: 11.5 }}

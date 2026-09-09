@@ -84,7 +84,6 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       socketRef.current.emit("join_map", { mapId });
     });
 
-    // 🟢 위치 수신 및 즉시 p5.js 캔버스 변수 연동
     socketRef.current.on('location_update', (data) => {
       if (!data) return;
 
@@ -98,10 +97,17 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       setUserPos({ x: clampedX, y: clampedY });
       if (data.zone) setCurrentZone(data.zone);
 
-      // p5.js 인스턴스 변수에 직접 주입하여 프레임 드랍 없는 스무스 이동 구현
       if (p5Instance.current) {
         p5Instance.current.userX = clampedX;
         p5Instance.current.userY = clampedY;
+      }
+    });
+
+    // 🆕 선제적 AI 메시지 수신 (proactiveTrigger 연동)
+    socketRef.current.on('proactive_message', (data) => {
+      if (data.scannerId === scannerId) {
+        console.log("🤖 [AI 선제적 안내]:", data.message);
+        // 추후 화면에 Toast나 Chat Bubble로 띄우는 로직 연결 가능
       }
     });
 
@@ -111,7 +117,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
         socketRef.current = null;
       }
     };
-  }, [mapId]);
+  }, [mapId, scannerId]);
 
   /* ==========================================================================
      🚻 [REST API] 초기 시설 정보 로드
@@ -128,6 +134,34 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       });
     return () => { cancelled = true; };
   }, [mapId]);
+
+  /* ==========================================================================
+     🤖 [해결책 적용] AI 챗봇 안전 통신 함수 (한글 헤더 에러 원천 차단)
+     ========================================================================== */
+  const askAI = async (questionText, targetNameKorean) => {
+    try {
+      // 🟢 해결됨: 한글 데이터(targetNameKorean)를 헤더가 아닌 JSON Body에 담아 전송
+      const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json' 
+          // ❌ 절대 여기에 'X-Zone-Name': targetNameKorean 같은 커스텀 한글 헤더를 넣지 마세요!
+        },
+        body: JSON.stringify({
+          scannerId,
+          mapId,
+          zone: currentZone,
+          targetName: targetNameKorean, // 한글 문자열은 무조건 이 안으로 들어와야 안전합니다
+          message: questionText
+        }),
+      });
+      const data = await res.json();
+      console.log("AI 응답 완료:", data);
+      // alert(`AI 응답: ${data.reply}`);
+    } catch (err) {
+      console.error("AI 챗봇 API 요청 실패:", err);
+    }
+  };
 
   /* ==========================================================================
      🧭 [A* 알고리즘] 최단 거리 / 혼잡 회피 경로 탐색
@@ -359,6 +393,13 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
               <p style={styles.desc}>{selectedArtwork.desc}</p>
             </div>
           </div>
+          {/* 🟢 새로 추가된 AI 설명 듣기 버튼 (한글 바디 전송) */}
+          <button 
+            style={{...styles.guideBtn, backgroundColor: "#10B981", marginTop: "8px", cursor: "pointer"}}
+            onClick={() => askAI("이 작품/상점에 대해 더 자세히 알려줘", selectedArtwork.name)}
+          >
+            🤖 AI 큐레이터에게 질문하기
+          </button>
         </div>
       )}
 
