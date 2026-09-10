@@ -73,7 +73,7 @@ router.post("/", async (req, res) => {
     });
 
     const reply = completion.choices[0]?.message?.content
-      || "앗, 잠시 생각이 엉켰어요! 다시 한번 말씀해 주실래요? 😅";
+      || "다시 한번 말씀해 주실수 있나요? 😅";
 
     // 6. AI 답변 DB 저장
     await ChatHistory.create({ scannerId, role: "assistant", message: reply, zone });
