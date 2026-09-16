@@ -11,21 +11,40 @@ import { checkProactiveTrigger } from "../services/proactiveTrigger.js";
 
 const router = Router();
 
-// 최근 5분간 맵의 zone별 스캐너(방문자) 수를 집계하는 공용 함수
+/**
+ * 💡 최근 15초 동안 신호를 보낸 "서로 다른 휴대폰 수"를 구역별로 집계
+ */
 async function getCongestionForMap(mapId) {
-  const recent = new Date(Date.now() - 5 * 60 * 1000); // 최근 5분
-
+  const activeSince = new Date(Date.now() - 15 * 1000);
   const agg = await ScannerReading.aggregate([
     {
       $match: {
         mapId: new mongoose.Types.ObjectId(mapId),
-        ts: { $gte: recent },
+        ts: { $gte: activeSince },
       },
     },
-    { $group: { _id: "$zone", count: { $sum: 1 } } },
+    // 같은 폰이 여러 번 보낸 기록 중 가장 최신 기록을 먼저 선택
+    { $sort: { ts: -1 } },
+    // scannerId당 최신 위치 하나만 남김
+    {
+      $group: {
+        _id: "$scannerId",
+        zone: { $first: "$zone" },
+      },
+    },
+    // 최신 위치 기준으로 구역별 실제 휴대폰 수 집계
+    {
+      $group: {
+        _id: "$zone",
+        count: { $sum: 1 },
+      },
+    },
   ]);
-
-  return Object.fromEntries(agg.map(a => [a._id, a.count]));
+  return Object.fromEntries(
+    agg
+      .filter((item) => item._id)
+      .map((item) => [item._id, item.count])
+  );
 }
 
 router.post("/", async (req, res) => {
@@ -112,7 +131,7 @@ router.post("/", async (req, res) => {
     // 5. ⚡ [즉시 응답] 안드로이드 앱으로 HTTP OK 응답 반환하여 Network Latency 최소화
     res.json({ status: "ok", scannerId, location: result });
 
-    // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 무거운 혼잡도 연산은 응답 후 비동기 처리
+    // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 혼잡도 연산은 응답 후 비동기 처리
     setImmediate(async () => {
       const io = req.app.get("io");
       
@@ -156,8 +175,8 @@ router.post("/", async (req, res) => {
           io.to(mapId).emit("congestion_update", { mapId, congestion });
           io.emit("congestion_update", { mapId, congestion });
           
-          // 🆕 AI 선제적 트리거 체크 (비동기, 응답 지연에 영향 없음)
-          const isCongested = (congestion[result.zone] || 0) >= 3; // 임계값은 상황에 맞게 조정
+          // 🆕 AI 선제적 트리거 체크 (실제 인원 기준 3명 이상 시 혼잡 판정)
+          const isCongested = (congestion[result.zone] || 0) >= 3; 
           checkProactiveTrigger({
             io,
             mapId,

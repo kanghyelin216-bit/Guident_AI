@@ -53,8 +53,9 @@ const mapObjects = [
 const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => {
   const canvasRef = useRef(null);
   
-  // 📡 상태 관리 정의
-  const [userPos, setUserPos] = useState({ x: 181, y: 383 }); 
+  // 📡 상태 관리 정의 (다중 사용자 목록 및 본인 위치 분리)
+  const [visitorPositions, setVisitorPositions] = useState([]); 
+  const [userPos, setUserPos] = useState(null);
   const [currentZone, setCurrentZone] = useState(null); 
   const [selectedArtwork, setSelectedArtwork] = useState(null); 
   const [facilities, setFacilities] = useState([]); 
@@ -67,7 +68,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
   const socketRef = useRef(null);
 
   /* ==========================================================================
-     📡 [소켓 엔지니어링] 실시간 RAW RSSI 기반 추정 위치 수신 루프
+     📡 [소켓 엔지니어링] 실시간 RAW RSSI 기반 다중 사용자 위치 수신 루프
      ========================================================================== */
   useEffect(() => {
     if (socketRef.current) return;
@@ -85,21 +86,48 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     });
 
     socketRef.current.on('location_update', (data) => {
-      if (!data) return;
+      if (!data?.scannerId) return;
 
-      const rawX = typeof data.x === 'number' ? data.x : (typeof data.X === 'number' ? data.X : null);
-      const rawY = typeof data.y === 'number' ? data.y : (typeof data.Y === 'number' ? data.Y : null);
+      const rawX = typeof data.x === 'number'
+        ? data.x
+        : (typeof data.X === 'number' ? data.X : null);
+      const rawY = typeof data.y === 'number'
+        ? data.y
+        : (typeof data.Y === 'number' ? data.Y : null);
 
       if (rawX === null || rawY === null) return;
 
-      const { x: clampedX, y: clampedY } = metersToPixels(rawX, rawY);
-      
-      setUserPos({ x: clampedX, y: clampedY });
-      if (data.zone) setCurrentZone(data.zone);
+      const now = Date.now();
 
-      if (p5Instance.current) {
-        p5Instance.current.userX = clampedX;
-        p5Instance.current.userY = clampedY;
+      // 같은 scannerId의 위치는 갱신하고, 다른 폰 위치는 유지합니다.
+      setVisitorPositions((previous) => {
+        const byScannerId = new Map(
+          previous.map((visitor) => [visitor.scannerId, visitor])
+        );
+        byScannerId.set(data.scannerId, {
+          scannerId: data.scannerId,
+          x: rawX,
+          y: rawY,
+          zone: data.zone || null,
+          updatedAt: now,
+        });
+        // 15초 동안 신호가 없는 폰은 공간을 떠난 것으로 보고 화면에서 제거합니다.
+        return [...byScannerId.values()].filter(
+          (visitor) => now - visitor.updatedAt < 15000
+        );
+      });
+
+      // QR URL의 ?sid=android_xxx 로 페어링된 본인 위치만 길찾기 기준 위치로 사용합니다.
+      if (data.scannerId === scannerId) {
+        const { x: clampedX, y: clampedY } = metersToPixels(rawX, rawY);
+        setUserPos({ x: clampedX, y: clampedY });
+        if (data.zone) {
+          setCurrentZone(data.zone);
+        }
+        if (p5Instance.current) {
+          p5Instance.current.userX = clampedX;
+          p5Instance.current.userY = clampedY;
+        }
       }
     });
 
@@ -107,7 +135,6 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     socketRef.current.on('proactive_message', (data) => {
       if (data.scannerId === scannerId) {
         console.log("🤖 [AI 선제적 안내]:", data.message);
-        // 추후 화면에 Toast나 Chat Bubble로 띄우는 로직 연결 가능
       }
     });
 
@@ -136,28 +163,25 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
   }, [mapId]);
 
   /* ==========================================================================
-     🤖 [해결책 적용] AI 챗봇 안전 통신 함수 (한글 헤더 에러 원천 차단)
+     🤖 [해결책 적용] AI 챗봇 안전 통신 함수
      ========================================================================== */
   const askAI = async (questionText, targetNameKorean) => {
     try {
-      // 🟢 해결됨: 한글 데이터(targetNameKorean)를 헤더가 아닌 JSON Body에 담아 전송
       const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json' 
-          // ❌ 절대 여기에 'X-Zone-Name': targetNameKorean 같은 커스텀 한글 헤더를 넣지 마세요!
         },
         body: JSON.stringify({
           scannerId,
           mapId,
           zone: currentZone,
-          targetName: targetNameKorean, // 한글 문자열은 무조건 이 안으로 들어와야 안전합니다
+          targetName: targetNameKorean,
           message: questionText
         }),
       });
       const data = await res.json();
       console.log("AI 응답 완료:", data);
-      // alert(`AI 응답: ${data.reply}`);
     } catch (err) {
       console.error("AI 챗봇 API 요청 실패:", err);
     }
@@ -214,11 +238,16 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
      🔄 p5.js 데이터 레벨 변수 동기화
      ========================================================================== */
   useEffect(() => {
-    if (p5Instance.current) {
-      p5Instance.current.userX = userPos.x;
-      p5Instance.current.userY = userPos.y;
-    }
-  }, [userPos]);
+    if (!p5Instance.current) return;
+    p5Instance.current.visitorPositionsPx = visitorPositions.map((visitor) => {
+      const point = metersToPixels(visitor.x, visitor.y);
+      return {
+        ...visitor,
+        x: point.x,
+        y: point.y,
+      };
+    });
+  }, [visitorPositions]);
 
   useEffect(() => {
     if (p5Instance.current) {
@@ -242,10 +271,12 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     if (canvasRef.current) canvasRef.current.innerHTML = ""; 
 
     const sketch = (p) => {
-      p.userX = userPos.x;
-      p.userY = userPos.y;
+      p.userX = userPos?.x ?? null;
+      p.userY = userPos?.y ?? null;
       p.facilitiesPx = [];
       p.navPathPx = null;
+      p.visitorPositionsPx = [];
+      p.myScannerId = scannerId;
 
       p.setup = () => {
         p.createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -313,8 +344,17 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
           p.pop();
         }
 
-        // 실시간 사용자 위치 마커 (파란 펄스 점)
-        drawUserMarker(p, p.userX, p.userY); 
+        // 공간 안에 있는 모든 안드로이드 폰 위치 표시
+        for (const visitor of p.visitorPositionsPx) {
+          // 내 폰은 아래에서 펄스 효과로 별도 표시합니다.
+          if (visitor.scannerId === p.myScannerId) continue;
+          drawVisitorMarker(p, visitor.x, visitor.y);
+        }
+
+        // 내 위치는 파란 펄스 효과로 강조
+        if (p.userX !== null && p.userY !== null) {
+          drawUserMarker(p, p.userX, p.userY);
+        }
       };
 
       const drawUserMarker = (p, x, y) => {
@@ -329,6 +369,19 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
         p.stroke(255);
         p.strokeWeight(3);
         p.circle(x, y, 14); 
+        p.pop();
+      };
+
+      const drawVisitorMarker = (p, x, y) => {
+        p.push();
+        // 다른 방문자: 작은 파란 점
+        p.fill(0, 122, 255, 45);
+        p.noStroke();
+        p.circle(x, y, 22);
+        p.fill(0, 122, 255);
+        p.stroke(255);
+        p.strokeWeight(2);
+        p.circle(x, y, 12);
         p.pop();
       };
 
@@ -358,10 +411,28 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     return () => {
       if (myP5) myP5.remove();
     };
-  }, []);
+  }, [scannerId]);
 
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "20px", position: "relative" }}>
+      {/* 👥 현재 공간 내 방문자 수 표시 배너 오버레이 */}
+      <div style={{
+        position: 'absolute',
+        top: 30,
+        left: 30,
+        zIndex: 10,
+        background: 'rgba(255,255,255,0.93)',
+        border: '1px solid #E9ECEF',
+        borderRadius: 12,
+        padding: '9px 12px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+        fontSize: 13,
+        fontWeight: 700,
+        color: '#2D3250',
+      }}>
+        👥 현재 공간 내 <span style={{ color: '#007AFF' }}>{visitorPositions.length}명</span>
+      </div>
+
       <div ref={canvasRef} style={styles.canvasContainer}></div>
 
       {(navMessage || navPath) && (
@@ -393,7 +464,6 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
               <p style={styles.desc}>{selectedArtwork.desc}</p>
             </div>
           </div>
-          {/* 🟢 새로 추가된 AI 설명 듣기 버튼 (한글 바디 전송) */}
           <button 
             style={{...styles.guideBtn, backgroundColor: "#10B981", marginTop: "8px", cursor: "pointer"}}
             onClick={() => askAI("이 작품/상점에 대해 더 자세히 알려줘", selectedArtwork.name)}

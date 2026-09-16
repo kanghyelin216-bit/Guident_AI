@@ -5,7 +5,7 @@ const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production'
   ? window.location.origin 
   : (window.location.port === '5173' || window.location.port === '3000'
       ? `${window.location.protocol}//${window.location.hostname}:4000`
-      : 'http://192.168.219.104:4000');
+      : 'http://172.18.41.69:4000');
 
 // 🔐 관리자 토큰 자동 처리 authFetch 래퍼
 async function authFetch(url, options = {}) {
@@ -121,7 +121,7 @@ function MapEditForm({ selectedMap, onSaved, setError }) {
 
       const res = await authFetch(`${YOUR_COMPUTER_IP}/api/maps/${selectedMap._id}`, {
         method: 'PUT',
-        body, // FormData라 Content-Type 헤더는 브라우저가 자동 설정
+        body,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -193,8 +193,7 @@ export default function AdminBeaconsSection() {
   const [error, setError] = useState('');
   const imgRef = useRef(null);
 
-  // 🆕 비콘 위치 수정 모드 상태
-  const [editingBeacon, setEditingBeacon] = useState(null);       // 수정 중인 비콘 객체 (없으면 null)
+  const [editingBeacon, setEditingBeacon] = useState(null);          // 수정 중인 비콘 객체 (없으면 null)
   const [beaconMovePreview, setBeaconMovePreview] = useState(null); // 새로 클릭한 좌표 미리보기
 
   const loadMaps = useCallback(async () => {
@@ -222,7 +221,7 @@ export default function AdminBeaconsSection() {
     loadBeacons(selectedMapId);
     loadSelectedMapDetail(selectedMapId);
     setPendingClick(null);
-    setEditingBeacon(null);        // 🆕 지도 바뀌면 편집모드 초기화
+    setEditingBeacon(null);
     setBeaconMovePreview(null);
   }, [selectedMapId, loadBeacons, loadSelectedMapDetail]);
 
@@ -234,7 +233,6 @@ export default function AdminBeaconsSection() {
     const xM = (pxX / rect.width) * selectedMap.widthM;
     const yM = (pxY / rect.height) * selectedMap.heightM;
 
-    // 🆕 비콘 위치 수정 모드일 땐 일반 등록용 pendingClick이 아니라 이동 미리보기에 저장
     if (editingBeacon) {
       setBeaconMovePreview({ xM, yM, pxX, pxY });
       return;
@@ -285,7 +283,6 @@ export default function AdminBeaconsSection() {
     } catch (err) { setError(err.message); }
   };
 
-  // 🆕 "위치 수정" 버튼 — 편집 모드 진입
   const handleStartEditPosition = (beacon) => {
     setEditingBeacon(beacon);
     setBeaconMovePreview(null);
@@ -293,13 +290,11 @@ export default function AdminBeaconsSection() {
     setError('');
   };
 
-  // 🆕 편집 취소
   const handleCancelEditPosition = () => {
     setEditingBeacon(null);
     setBeaconMovePreview(null);
   };
 
-  // 🆕 새 위치 저장 — 기존 beacons.js의 PUT /:id 재사용
   const handleSaveBeaconPosition = async () => {
     if (!editingBeacon || !beaconMovePreview) {
       setError('지도를 클릭해 새 위치를 먼저 지정하세요.');
@@ -401,7 +396,6 @@ export default function AdminBeaconsSection() {
             </select>
           </div>
 
-          {/* 🆕 지도 정보(이름/가로/세로) 수정 폼 */}
           <MapEditForm
             selectedMap={selectedMap}
             setError={setError}
@@ -411,7 +405,6 @@ export default function AdminBeaconsSection() {
             }}
           />
 
-          {/* 🆕 비콘 위치 수정 모드 안내 배너 */}
           {editingBeacon && (
             <div style={{
               background: '#FEF9EC', border: `1px solid ${T.warn}`, borderRadius: 10,
@@ -436,14 +429,19 @@ export default function AdminBeaconsSection() {
                 return (
                   <div key={b._id} style={{
                     position: 'absolute', left, top, transform: 'translate(-50%, -50%)',
-                    width: isEditing ? 10 : 14, height: isEditing ? 10 : 14, borderRadius: '50%',
-                    background: isEditing ? 'rgba(107,174,214,0.35)' : (b.visible ? T.accent : '#CBD3E6'),
-                    border: '2px solid white',
-                  }} />
+                    width: isEditing ? 20 : 14, height: isEditing ? 20 : 14, borderRadius: '50%',
+                    background: isEditing ? '#FFD43B' : (b.visible ? T.accent : '#CBD3E6'),
+                    border: isEditing ? '3px solid #F08C00' : '2px solid white',
+                    boxShadow: isEditing ? '0 0 0 5px rgba(255, 212, 59, 0.35)' : 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#6B4E00', fontSize: 9, fontWeight: 800,
+                    zIndex: isEditing ? 5 : 1,
+                  }}>
+                    {isEditing ? '원래' : ''}
+                  </div>
                 );
               })}
 
-              {/* 🆕 비콘 새 위치 미리보기 마커 (주황색) */}
               {editingBeacon && beaconMovePreview && (
                 <div style={{
                   position: 'absolute', left: beaconMovePreview.pxX, top: beaconMovePreview.pxY,
@@ -496,7 +494,6 @@ export default function AdminBeaconsSection() {
                             x: {b.x?.toFixed?.(2) ?? b.x} · y: {b.y?.toFixed?.(2) ?? b.y} · TX: {b.txPower}dBm
                           </div>
                         </div>
-                        {/* 🆕 위치 수정 버튼 */}
                         <button
                           onClick={() => handleStartEditPosition(b)}
                           style={{ ...btnStyle('#E9ECEF', T.text), padding: '6px 10px', fontSize: 11.5 }}
