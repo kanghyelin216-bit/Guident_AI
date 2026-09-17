@@ -318,16 +318,17 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
           }
           p.rect(obj.x, obj.y, obj.w, obj.h, 8); 
 
-          p.noStroke();
-          if (obj.w < 50) {
-            p.fill(73, 80, 87); p.textSize(10.5); p.textStyle(p.BOLD);
-            let padding = 4;
-            p.text(  obj.shortName || obj.name,obj.x + padding,obj.y + padding,obj.w - padding * 2,obj.h - padding * 2);
-          } else {
-            p.fill(33, 37, 41); p.textSize(12); p.textStyle(p.BOLD);
-            p.text(obj.name, obj.x + obj.w / 2, obj.y + obj.h / 2);
-          }
-          p.pop(); 
+        p.noStroke();
+        if (obj.type === 'booth') {
+          p.fill(73, 80, 87); p.textSize(10.5); p.textStyle(p.BOLD);
+          const padding = 4;
+          p.text(obj.shortName || obj.name, obj.x + padding, obj.y + padding, obj.w - padding * 2, obj.h - padding * 2);
+        } else {
+          p.fill(33, 37, 41); p.textSize(12); p.textStyle(p.BOLD);
+          p.text(obj.name, obj.x + obj.w / 2, obj.y + obj.h / 2);
+        }
+        p.pop();
+        
         }
 
         // A* 경로 시각화
