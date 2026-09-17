@@ -5,13 +5,23 @@
  */
 import WeightedCentroid from "./weightedCentroid.js";
 
-const engine = new WeightedCentroid({ cellSizeM: 1.0 });
+const engine = new WeightedCentroid({
+  cellSizeM: 1.0,
+  maxUsedBeacons: 4,
+  minDistance: 0.3,
+  maxValidDistance: 13.5,
+  minValidRssi: -95,
+  distanceEmaAlpha: 0.35,
+  maxDistanceJumpM: 3.0,
+  positionEmaAlpha: 0.45,
+});
 
 /**
  * @param {Array<{beaconId, rssi, distance}>} readings
- * @param {Map<string, {x,y,txPower}>} beaconMap
+ * @param {Map<string,{x,y,txPower}>} beaconMap
+ * @param {string} scannerId
  * @returns {{ x, y, zone, confidence, usedBeacons } | null}
  */
-export function estimateLocation(readings, beaconMap) {
-  return engine.calculate(readings, beaconMap);
+export function estimateLocation(readings, beaconMap, scannerId = "default") {
+  return engine.calculate(readings, beaconMap, scannerId);
 }
