@@ -1,73 +1,71 @@
 /**
- * routes/navigation.js
- * POST /api/navigation/path
- * Body: { mapId, fromZone, toFacilityId, avoidCongestion }
+ * modules/location/weightedCentroid.js (개선 버전)
  */
-import { Router } from "express";
-import mongoose from "mongoose";
-import { Map, ScannerReading } from "../models/index.js";
-import { findPath } from "../modules/pathfinder.js";
-
-const router = Router();
-
-router.post("/path", async (req, res) => {
-  const { mapId, fromZone, toFacilityId, avoidCongestion = false } = req.body;
-
-  const mapDoc = await Map.findById(mapId);
-  if (!mapDoc) return res.status(404).json({ error: "맵 없음" });
-
-  const { wallGrid, facilities, widthM, heightM, cellSizeM } = mapDoc;
-
-  // 목적지 시설 좌표 → 그리드 셀
-  const dest = facilities.find(f => f.id === toFacilityId);
-  if (!dest) return res.status(404).json({ error: "시설 없음" });
-
-  // zone "R01C02" → [row, col]
-  const parseZone = z => {
-    const m = z.match(/R(\d+)C(\d+)/);
-    return m ? [+m[1], +m[2]] : null;
-  };
-
-  const start = parseZone(fromZone);
-  const goal  = [Math.floor(dest.y / cellSizeM), Math.floor(dest.x / cellSizeM)];
-
-  if (!start) return res.status(400).json({ error: "fromZone 형식 오류" });
-
-  // 혼잡도 그리드 구성 (최근 5분 ScannerReading 집계)
-  let congestionGrid = null;
-  if (avoidCongestion) {
-    const recent = new Date(Date.now() - 5 * 60 * 1000);
-    const agg = await ScannerReading.aggregate([
-      // 몽고DB ObjectId 타입 불일치 에러를 방지하기 위해 명시적으로 변환
-      { $match: { mapId: new mongoose.Types.ObjectId(mapId), ts: { $gte: recent } } },
-      { $group: { _id: "$zone", count: { $sum: 1 } } },
-    ]);
-    const rows = Math.ceil(heightM / cellSizeM);
-    const cols = Math.ceil(widthM  / cellSizeM);
-    congestionGrid = Array.from({ length: rows }, () => new Array(cols).fill(0));
-    for (const { _id, count } of agg) {
-      const p = parseZone(_id);
-      if (p) congestionGrid[p[0]][p[1]] = count;
-    }
+export default class WeightedCentroid {
+  constructor({ cellSizeM = 1.0 } = {}) {
+    this.cellSizeM = cellSizeM;
+    // 세션(scannerId)별 이전 위치 좌표 보관 (EMA 필터용)
+    this.lastPositions = new Map();
+    // EMA 가중치 (alpha): 0.1 ~ 0.3 사이 권장 (작을수록 부드럽지만 반응 지연 증가, 크면 빠르지만 튐)
+    this.alpha = 0.25;
   }
 
-  // wallGrid가 없으면 빈 그리드 생성
-  const grid = wallGrid?.length ? wallGrid :
-    Array.from({ length: Math.ceil(heightM / cellSizeM) },
-      () => new Array(Math.ceil(widthM / cellSizeM)).fill(0));
+  /**
+   * @param {Array<{beaconId, rssi, distance}>} readings
+   * @param {Map<string, {x, y, txPower}>} beaconMap
+   * @param {string} scannerId - 이동평균 상태 추적을 위한 스캐너 식별자
+   */
+  calculate(readings, beaconMap, scannerId = 'default') {
+    // 1) DB에 등록된 비콘 수신 데이터만 필터링
+    const matched = readings
+      .map(r => ({ ...r, info: beaconMap.get(r.beaconId) }))
+      .filter(r => r.info && r.distance > 0);
 
-  const pathCells = findPath(grid, congestionGrid, start, goal, avoidCongestion);
+    if (matched.length < 3) return null;
 
-  if (!pathCells) return res.json({ found: false, message: "경로 없음" });
+    // 2) 가까운 거리 순으로 top 3 선택
+    matched.sort((a, b) => a.distance - b.distance);
+    const used = matched.slice(0, 3);
 
-  // 셀 좌표 → 미터 좌표 변환 (중심점)
-  const pathM = pathCells.map(([r, c]) => ({
-    x: (c + 0.5) * cellSizeM,
-    y: (r + 0.5) * cellSizeM,
-    zone: `R${String(r).padStart(2,"0")}C${String(c).padStart(2,"0")}`,
-  }));
+    // 3) Raw 가중 중심 위치 계산
+    let wx = 0, wy = 0, wsum = 0;
+    for (const r of used) {
+      // 0.1m 이하 0 나눔 방지 및 튀는 현상 완화
+      const safeDist = Math.max(r.distance, 0.5);
+      const w = 1 / (safeDist * safeDist);
+      wx += r.info.x * w;
+      wy += r.info.y * w;
+      wsum += w;
+    }
+    if (wsum === 0) return null;
 
-  res.json({ found: true, steps: pathM.length, path: pathM });
-});
+    let rawX = wx / wsum;
+    let rawY = wy / wsum;
 
-export default router;
+    // 4) 🟢 Exponential Moving Average (EMA) 적용으로 좌표 튀는 현상 원천 차단
+    let finalX = rawX;
+    let finalY = rawY;
+
+    if (this.lastPositions.has(scannerId)) {
+      const prev = this.lastPositions.get(scannerId);
+      finalX = this.alpha * rawX + (1 - this.alpha) * prev.x;
+      finalY = this.alpha * rawY + (1 - this.alpha) * prev.y;
+    }
+
+    // 상태 업데이트
+    this.lastPositions.set(scannerId, { x: finalX, y: finalY });
+
+    // 5) 그리드 셀 구역 계산
+    const col = Math.floor(finalX / this.cellSizeM);
+    const row = Math.floor(finalY / this.cellSizeM);
+    const zone = `R${String(row).padStart(2, "0")}C${String(col).padStart(2, "0")}`;
+
+    return {
+      x: finalX,
+      y: finalY,
+      zone,
+      confidence: used.length / 3,
+      usedBeacons: used.map(r => r.beaconId),
+    };
+  }
+}
