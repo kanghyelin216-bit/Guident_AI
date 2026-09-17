@@ -43,20 +43,20 @@ const mapObjects = [
   {x: 94, y: 0, w: 412, h: 40,name: '칠판',type: 'etc',desc: '전시 소개, 발표 및 시연 안내가 진행되는 공간입니다.',},
   
   // 왼쪽 벽 작품
-  {x: 0, y: 560, w: 50, h: 110,name: 'ICT PBL 프로젝트',shortName:'작품3',type: 'booth',
-    beaconId: 'A3',author: '학생 융합 프로젝트',desc: '학생들이 직접 기획하고 개발한 ICT 융합 프로젝트의 결과물을 소개하고 체험할 수 있는 전시입니다.',},
-  {x: 0, y: 320, w: 50, h: 110,name: '실시간 이미지 분류',shortName:'작품2',type: 'booth',
-    beaconId: 'A2',author: '작가명',desc: '카메라로 사물을 촬영하면 딥러닝 모델이 이미지를 분석하여 분류 결과를 실시간으로 보여주는 체험입니다.',},
   {x: 0, y: 80, w: 50, h: 110,name: '스마트 홈 제어판',shortName:'작품1',type: 'booth',
     beaconId: 'A1',author: '음성·앱 기반 제어',desc: '음성 명령과 모바일 앱으로 조명, 온도, 보안 장치를 제어하는 스마트 홈 시스템 체험 부스입니다.',},
+  {x: 0, y: 320, w: 50, h: 110,name: '실시간 이미지 분류',shortName:'작품2',type: 'booth',
+    beaconId: 'A2',author: '작가명',desc: '카메라로 사물을 촬영하면 딥러닝 모델이 이미지를 분석하여 분류 결과를 실시간으로 보여주는 체험입니다.',},
+  {x: 0, y: 560, w: 50, h: 110,name: 'ICT PBL 프로젝트',shortName:'작품3',type: 'booth',
+    beaconId: 'A3',author: '학생 융합 프로젝트',desc: '학생들이 직접 기획하고 개발한 ICT 융합 프로젝트의 결과물을 소개하고 체험할 수 있는 전시입니다.',},
 
   // 오른쪽 벽 작품
-  {x: 550, y: 80, w: 50, h: 110,name: 'AI 임베디드 시스템',shortName:'작품4',type: 'booth',
-    beaconId: 'A7',author: '온디바이스 AI 체험',desc: '하드웨어에 AI를 직접 내장하여 인터넷 연결 없이도 동작하는 온디바이스 AI 기술을 체험하는 전시입니다.',},
-  {x: 550, y: 320, w: 50, h: 110,name: '스마트 센서 네트워크',shortName:'작품5',type: 'booth',
-    beaconId: 'A6',author: 'IoT 데이터 수집·분석',desc: '온도·습도·조도 등 다양한 센서를 IoT로 연결하고, 실시간 데이터를 수집·분석하는 시스템입니다.',},
   {x: 550, y: 560, w: 50, h: 110,name: '자율주행 로봇',shortName: '작품6',type: 'booth',
     beaconId: 'A5',author: '센서 기반 자율주행',desc: '라이다와 카메라 센서로 주변 장애물을 인식하고, 스스로 안전한 경로를 찾아 이동하는 로봇 시연입니다.',},
+  {x: 550, y: 320, w: 50, h: 110,name: '스마트 센서 네트워크',shortName:'작품5',type: 'booth',
+    beaconId: 'A6',author: 'IoT 데이터 수집·분석',desc: '온도·습도·조도 등 다양한 센서를 IoT로 연결하고, 실시간 데이터를 수집·분석하는 시스템입니다.',},
+  {x: 550, y: 80, w: 50, h: 110,name: 'AI 임베디드 시스템',shortName:'작품4',type: 'booth',
+    beaconId: 'A7',author: '온디바이스 AI 체험',desc: '하드웨어에 AI를 직접 내장하여 인터넷 연결 없이도 동작하는 온디바이스 AI 기술을 체험하는 전시입니다.',},
 
   // 상단·하단 출입문
   {x: 558, y: 0, w: 42, h: 50,name: '출입문',type: 'door',desc: '전시장 전면 출입구입니다. 통행에 유의해 주세요.',},
