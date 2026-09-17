@@ -51,12 +51,12 @@ const ADMIN_MENU_ITEM = {
 };
 
 const T = {
-  bg: '#FAFBFF',         // 조금 더 하얗고 투명한 배경
+  bg: '#FAF8F3',         // 조금 더 하얗고 투명한 배경
   card: '#FFFFFF',      
-  border: '#E2E8F0',    
-  radius: '20px',       
-  shadow: '0 8px 20px -6px rgba(15, 23, 42, 0.05)',   
-  shadowMd: '0 15px 35px -8px rgba(15, 23, 42, 0.12)', 
+  border: '#E2E4E1',    
+  radius: '8px',       
+  shadow: '0 2px 8px rgba(15, 23, 42, 0.04)',   
+  shadowMd: '0 6px 16px rgba(15, 23, 42, 0.07)', 
   text: '#111827',       // 텍스트 컬러를 아주 조금 더 진하게 (거의 블랙)
   sub: '#6B7280',       
   inputBg: '#F3F4F6',   
@@ -101,106 +101,107 @@ function Header({ activePage, onBack, paired, allMenuItems }) {
   const activeMenu = allMenuItems.find(m => m.id === activePage);
   return (
     <header style={{
-      position: 'sticky', top: 0, zIndex: 20,
-      background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)',
-      borderBottom: `1px solid ${T.border}`, padding: '16px 20px',
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+      position: 'sticky', top: 0, zIndex: 20, background: 'rgba(250,248,243,0.96)',
+      backdropFilter: 'blur(10px)', borderBottom: `1px solid ${T.border}`,
+      padding: '15px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
         {activePage ? (
-          <button onClick={onBack} style={{
-            background: T.inputBg, border: 'none', borderRadius: 14,
-            width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: T.text, flexShrink: 0,
-          }}>
-            <ArrowLeft size={18} />
-          </button>
+          <button aria-label="홈으로 돌아가기" onClick={onBack} style={{ background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 5, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: T.text, flexShrink: 0 }}><ArrowLeft size={18} /></button>
         ) : (
-          // 🟢 [추가] 서비스 로고/아이콘 (심플한 컴퍼스 아이콘 배치)
-          <div style={{ 
-            width: 38, height: 38, borderRadius: 12, 
-            background: 'linear-gradient(135deg, #6BAED6 0%, #74C476 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'white', fontSize: 18
-          }}>
-            <MapPin size={20} />
-          </div>
+          <div style={{ width: 33, height: 33, borderRadius: 4, background: '#182B42', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF' }}><MapPin size={18} strokeWidth={1.8} /></div>
         )}
         <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text, lineHeight: 1.2, letterSpacing: '-0.3px' }}>
-            {activePage ? activeMenu?.label : 'Guidant'} 
-          </div>
-          {/* 🟢 [변경] 전시 가이드 텍스트를 헤더 내부의 별도 배지로 변경 */}
-          {!activePage && (
-            <div style={{ display: 'flex', marginTop: 3 }}>
-              <span style={{ 
-                fontSize: 10, fontWeight: 600, color: T.sub, 
-                background: '#F1F5F9', padding: '1px 6px', borderRadius: 4
-              }}>전시 가이드</span>
-            </div>
-          )}
+          <div style={{ fontSize: 18, fontWeight: 750, color: '#182B42', lineHeight: 1.2, letterSpacing: '-0.4px' }}>{activePage ? activeMenu?.label : 'Guidant'}</div>
+          {!activePage && <div style={{ fontSize: 10, fontWeight: 650, letterSpacing: '0.13em', color: '#77808A', marginTop: 3 }}>EXHIBITION GUIDE</div>}
         </div>
       </div>
-
-      <div style={{
-        fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 10, flexShrink: 0,
-        color: paired ? '#2F9E44' : '#E8590C',
-        background: paired ? '#EBFBEE' : '#FFF4E6',
-        boxShadow: 'inset 0 1px 1px rgba(0,0,0,0.03)'
-      }}>
-        {paired ? '📡 위치 연동됨' : '🔌 위치 미연동'}
-      </div>
+      <div style={{ fontSize: 11, fontWeight: 650, padding: '6px 8px', borderRadius: 3, flexShrink: 0, color: paired ? '#315E50' : '#8A5A21', background: paired ? '#ECF3EE' : '#FAF3E8', border: `1px solid ${paired ? '#D7E7DE' : '#EDDEC8'}` }}>{paired ? '위치 연동됨' : '위치 미연동'}</div>
     </header>
   );
 }
 
-/* ── 홈 메뉴 ── */
+/* ── 홈: 전시장 입구 ── */
 function HomeMenu({ items, onNavigate }) {
+  const byId = Object.fromEntries(items.map(item => [item.id, item]));
+  const nearby = byId.exhibits;
+  const chat = byId.chat;
+  const recommend = byId.recommend;
+  const map = byId.map;
+  const admin = byId.admin;
+  const QuickButton = ({ item }) => {
+    if (!item) return null;
+    const Icon = item.icon;
+    return <button onClick={() => onNavigate(item.id)} style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', padding: '13px 3px 11px', cursor: 'pointer', color: '#56697B', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}><Icon size={19} strokeWidth={1.7} /><span style={{ fontSize: 11, fontWeight: 650, whiteSpace: 'nowrap', letterSpacing: '-0.3px' }}>{item.label}</span></button>;
+  };
+
   return (
-    <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <p style={{ fontSize: 14, color: T.sub, marginBottom: 6, fontWeight: 500, letterSpacing: '-0.2px' }}>어떤 기능을 이용하시겠어요? 👀</p>
-      {items.map((item) => {
-        return (
-          <button key={item.id} onClick={() => onNavigate(item.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 16,
-            padding: '20px 22px', background: T.card,
-            border: 'none', borderRadius: T.radius,
-            boxShadow: T.shadowMd, // 🟢 [변경] 더 풍성한 그림자 적용
-            cursor: 'pointer', textAlign: 'left',
-            transition: 'transform 0.15s, box-shadow 0.15s, background 0.1s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 25px 40px -15px rgba(15, 23, 42, 0.18)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = T.shadowMd; }}
-            onMouseDown={e => { e.currentTarget.style.background = '#F9FAFB'; }}
-            onMouseUp={e => { e.currentTarget.style.background = T.card; }}
-          >
-            <div style={{ width: 52, height: 52, borderRadius: 16, flexShrink: 0, background: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
-              {item.emoji}
-            </div>
-            <div style={{ flex: 1, paddingRight: 4 }}>
-              {/* 🟢 [변경] 라벨 강조 */}
-              <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 5, letterSpacing: '-0.3px' }}>{item.label}</div>
-              {/* 🟢 [변경] 설명의 폰트 사이즈를 줄여 위계를 명확히 */}
-              <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.4, maxWidth: '90%' }}>{item.desc}</div>
-            </div>
-            <div style={{ color: '#D1D5DB', fontSize: 22, fontWeight: 200, paddingLeft: 4 }}>›</div>
-          </button>
-        );
-      })}
+    <div style={{ padding: '28px 20px 25px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <section>
+        <div style={{ color: '#667786', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', marginBottom: 9 }}>2026 CAPSTONE EXHIBITION</div>
+        <h1 style={{ margin: 0, color: '#182B42', fontSize: 27, fontWeight: 760, lineHeight: 1.35, letterSpacing: '-1px' }}>나의 전시 관람을<br />시작해 보세요.</h1>
+        <p style={{ margin: '10px 0 0', color: '#6E7880', fontSize: 13, lineHeight: 1.6, letterSpacing: '-0.15px' }}>현재 위치를 바탕으로 작품과 체험 공간을 안내합니다.</p>
+      </section>
+
+      <section style={{ background: '#E9E5DA', border: '1px solid #DDD8CA', borderRadius: 8, overflow: 'hidden' }}>
+        <button aria-label="전시장 지도 열기" onClick={() => onNavigate('map')} style={{ display: 'block', position: 'relative', width: '100%', height: 183, padding: 0, overflow: 'hidden', background: '#E9E5DA', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+          <div style={{ position: 'absolute', inset: 17, border: '1.5px solid #87909A', borderRadius: 2 }} />
+          <div style={{ position: 'absolute', left: '13%', top: '18%', width: '24%', height: '25%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
+          <div style={{ position: 'absolute', left: '48%', top: '18%', width: '37%', height: '25%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
+          <div style={{ position: 'absolute', left: '13%', top: '59%', width: '31%', height: '23%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
+          <div style={{ position: 'absolute', left: '57%', top: '59%', width: '28%', height: '23%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
+          {[["A1", '25%', '31%'], ["A2", '64%', '31%'], ["A3", '73%', '71%'], ["A5", '29%', '71%']].map(([label, left, top]) => <span key={label} style={{ position: 'absolute', left, top, transform: 'translate(-50%,-50%)', color: '#526273', fontSize: 10, fontWeight: 750, letterSpacing: '0.04em' }}>{label}</span>)}
+          <span style={{ position: 'absolute', left: '49%', top: '52%', width: 32, height: 32, borderRadius: '50%', background: 'rgba(24,43,66,0.14)', transform: 'translate(-50%,-50%)' }} />
+          <span style={{ position: 'absolute', left: '49%', top: '52%', width: 13, height: 13, borderRadius: '50%', background: '#1D4A78', border: '3px solid #FFFFFF', transform: 'translate(-50%,-50%)', boxSizing: 'border-box', boxShadow: '0 1px 4px rgba(24,43,66,0.28)' }} />
+          <span style={{ position: 'absolute', right: 14, bottom: 12, color: '#182B42', background: 'rgba(250,248,243,0.94)', border: '1px solid #D7D1C4', borderRadius: 3, fontSize: 11, fontWeight: 700, padding: '7px 9px' }}>전체 지도 보기 →</span>
+        </button>
+        <div style={{ background: '#FAF8F3', padding: '12px 15px', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #DDD8CA' }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1D4A78', display: 'inline-block' }} />
+          <span style={{ color: '#43576B', fontSize: 12, fontWeight: 650 }}>현재 위치를 확인했습니다</span>
+        </div>
+      </section>
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <button onClick={() => onNavigate('chat')} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 13, padding: '17px 15px', background: '#203B58', border: '1px solid #203B58', borderRadius: 7, cursor: 'pointer', textAlign: 'left', color: '#FFFFFF' }}>
+          <div style={{ width: 39, height: 39, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><MessageSquare size={19} strokeWidth={1.7} /></div>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 15, fontWeight: 750, letterSpacing: '-0.35px', marginBottom: 4 }}>AI 도슨트에게 물어보기</div><div style={{ color: '#C8D5E1', fontSize: 12, lineHeight: 1.45 }}>작품, 체험 방법, 관람 동선을 바로 질문하세요</div></div>
+          <span style={{ color: '#D6E0E9', fontSize: 21, fontWeight: 300 }}>›</span>
+        </button>
+        <div style={{ display: 'flex', gap: 7, paddingLeft: 2, overflowX: 'auto' }}>
+          {['이 작품은 무엇인가요?', '체험 방법 알려줘'].map(question => <button key={question} onClick={() => onNavigate('chat')} style={{ whiteSpace: 'nowrap', color: '#53697E', background: '#F2F1EC', border: '1px solid #E1DED3', borderRadius: 20, padding: '7px 10px', fontSize: 11, cursor: 'pointer' }}>{question}</button>)}
+        </div>
+      </section>
+
+      <section style={{ borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: '16px 0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#78818A', letterSpacing: '0.1em', marginBottom: 8 }}>NEARBY EXHIBIT</div>
+        <button onClick={() => onNavigate('exhibits')} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 13, padding: 0, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+          <div style={{ width: 42, height: 42, border: '1px solid #C9D2D7', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1D4A78', flexShrink: 0 }}><MapPin size={20} strokeWidth={1.6} /></div>
+          <div style={{ flex: 1 }}><div style={{ color: '#1C3046', fontSize: 16, fontWeight: 750, letterSpacing: '-0.4px', marginBottom: 3 }}>AI 임베디드 시스템</div><div style={{ color: '#79818A', fontSize: 12 }}>A1 Zone · 현재 위치에서 가까움</div></div>
+          <span style={{ color: '#73808C', fontSize: 21, fontWeight: 300 }}>›</span>
+        </button>
+      </section>
+
+      <section style={{ display: 'flex', alignItems: 'stretch', border: `1px solid ${T.border}`, borderRadius: 6, overflow: 'hidden', background: '#FCFBF8' }}>
+        <QuickButton item={map} /><div style={{ width: 1, background: T.border, margin: '11px 0' }} />
+        <QuickButton item={nearby} /><div style={{ width: 1, background: T.border, margin: '11px 0' }} />
+        <QuickButton item={chat} />
+      </section>
+      {recommend && <button onClick={() => onNavigate('recommend')} style={{ background: 'transparent', border: 'none', padding: 0, color: '#6F7B87', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 4, fontSize: 12, alignSelf: 'center' }}>맞춤 관람 추천 보기</button>}
+      {admin && <button onClick={() => onNavigate('admin')} style={{ width: '100%', background: 'transparent', border: `1px dashed ${T.border}`, borderRadius: 5, padding: '11px 12px', color: '#66717B', cursor: 'pointer', fontSize: 12, textAlign: 'left' }}>관리자 도구 · 비콘 위치 등록 <span style={{ float: 'right' }}>›</span></button>}
     </div>
   );
 }
+
 /* ── 주변 전시물 ── */
 function ExhibitsSection() {
   const congestion = useCongestion();
   const items = [
-      { name: 'AI 임베디드 시스템', category: '전시물', beaconId: 'A7', dot: '#6BAED6' },
-      { name: '스마트 센서 네트워크', category: '전시물', beaconId: 'A6', dot: '#74C476' },
-      { name: '자율주행 로봇', category: '전시물', beaconId: 'A5', dot: '#FDAE6B' },
-      { name: 'ICT PBL 프로젝트', category: '전시물', beaconId: 'A3', dot: '#F768A1' },
-      { name: '실시간 이미지 분류', category: '전시물', beaconId: 'A2', dot: '#9B8FE8' },
-      { name: '스마트 홈 제어판', category: '전시물', beaconId: 'A1', dot: '#F9A8D4' },
-
+    { name: '작품1',   category: '전시물',    beaconId: 'A1', dot: '#6BAED6' },
+    { name: '작품2',   category: '전시물',    beaconId: 'A2', dot: '#74C476' },
+    { name: '작품3',   category: '전시물',    beaconId: 'A3', dot: '#FDAE6B' },
+    { name: '작품4',   category: '전시물',    beaconId: 'A4', dot: '#F768A1' },
+    { name: '작품5',   category: '전시물',    beaconId: 'A5', dot: '#9B8FE8' },
+    { name: '작품6',   category: '전시물',    beaconId: 'A6', dot: '#F9A8D4' },
   ];
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>

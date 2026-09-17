@@ -187,7 +187,7 @@ router.post("/", async (req, res) => {
           io.emit("congestion_update", { mapId, congestion });
           
           // AI 선제적 트리거 체크 (비동기, 응답 지연에 영향 없음)
-          const isCongested = (congestion[result.zone] || 0) >= 3; 
+          const isCongested = (congestion[result.zone] || 0) >= 2; 
           checkProactiveTrigger({
             io,
             mapId,
