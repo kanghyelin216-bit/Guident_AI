@@ -12,9 +12,9 @@ if (typeof window !== 'undefined') {
    📐 캔버스 및 레이아웃 설정 (1미터 = 45픽셀 규격 일치)
    ========================================================================== */
 const showGrid = false;
-const CANVAS_WIDTH = 602;
-const CANVAS_HEIGHT = 767;
-const PIXEL_SCALE = 45;
+const CANVAS_WIDTH = 600;
+const CANVAS_HEIGHT = 750;
+const PIXEL_SCALE = 75;
 
 // 백엔드 Express 서버 주소
 const SERVER_BASE_URL = typeof window !== 'undefined'
@@ -39,15 +39,22 @@ function metersToPixelsRaw(xM, yM) {
    🎨 고정 맵 오브젝트 레이아웃
    ========================================================================== */
 const mapObjects = [
-  { x: 56,  y: 0,   w: 250, h: 40,  name: '칠판', type: 'etc', desc: '강의 및 발표용 대형 칠판입니다.' },
-  { x: 332, y: 84,  w: 30,  h: 111, name: '작품1', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 332, y: 328, w: 30,  h: 111, name: '작품2', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 332, y: 572, w: 30,  h: 111, name: '작품3', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 0,   y: 572, w: 30,  h: 111, name: '작품4', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 0,   y: 328, w: 30,  h: 111, name: '작품5', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 0,   y: 84,  w: 30,  h: 111, name: '작품6', type: 'booth', author: '작가명', desc: '작품 설명' },
-  { x: 337, y: 0,   w: 25,  h: 50,  name: '출입문', type: 'door', desc: '전시장 전면 출입구입니다. 통행에 유의해 주세요.' },
-  { x: 337, y: 717, w: 25,  h: 50,  name: '출입문', type: 'door', desc: '전시장 후면 출입구 및 비상구입니다.' }
+  // 상단 칠판: 가로 중앙
+  {x: 94, y: 0, w: 412, h: 40,name: '칠판',type: 'etc',desc: '강의 및 발표용 대형 칠판입니다.',},
+
+  // 오른쪽 벽 작품
+  {x: 550, y: 80, w: 50, h: 110,name: '작품1',type: 'booth',beaconId: 'A1',author: '작가명',desc: '작품 설명',},
+  {x: 550, y: 320, w: 50, h: 110,name: '작품2',type: 'booth',beaconId: 'A2',author: '작가명',desc: '작품 설명',},
+  {x: 550, y: 560, w: 50, h: 110,name: '작품3',type: 'booth',beaconId: 'A3',author: '작가명',desc: '작품 설명',},
+
+  // 왼쪽 벽 작품
+  {x: 0, y: 560, w: 50, h: 110,name: '작품4',type: 'booth',beaconId: 'A4',author: '작가명',desc: '작품 설명',},
+  {x: 0, y: 320, w: 50, h: 110,name: '작품5',type: 'booth',beaconId: 'A5',author: '작가명',desc: '작품 설명',},
+  {x: 0, y: 80, w: 50, h: 110,name: '작품6',type: 'booth',beaconId: 'A6',author: '작가명',desc: '작품 설명',},
+
+  // 상단·하단 출입문
+  {x: 558, y: 0, w: 42, h: 50,name: '출입문',type: 'door',desc: '전시장 전면 출입구입니다. 통행에 유의해 주세요.',},
+  {x: 558, y: 700, w: 42, h: 50, name: '출입문',type: 'door',desc: '전시장 후면 출입구 및 비상구입니다.',},
 ];
 
 const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => {
