@@ -196,12 +196,13 @@ function HomeMenu({ items, onNavigate }) {
 function ExhibitsSection() {
   const congestion = useCongestion();
   const items = [
-    { name: '작품1',   category: '전시물',    beaconId: 'A1', dot: '#6BAED6' },
-    { name: '작품2',   category: '전시물',    beaconId: 'A2', dot: '#74C476' },
-    { name: '작품3',   category: '전시물',    beaconId: 'A3', dot: '#FDAE6B' },
-    { name: '작품4',   category: '전시물',    beaconId: 'A4', dot: '#F768A1' },
-    { name: '작품5',   category: '전시물',    beaconId: 'A5', dot: '#9B8FE8' },
-    { name: '작품6',   category: '전시물',    beaconId: 'A6', dot: '#F9A8D4' },
+    { name: 'AI 임베디드 시스템', category: '전시물', beaconId: 'A7', dot: '#6BAED6' },
+    { name: '스마트 센서 네트워크', category: '전시물', beaconId: 'A6', dot: '#74C476' },
+    { name: '자율주행 로봇', category: '전시물', beaconId: 'A5', dot: '#FDAE6B' },
+    { name: 'ICT PBL 프로젝트', category: '전시물', beaconId: 'A3', dot: '#F768A1' },
+    { name: '실시간 이미지 분류', category: '전시물', beaconId: 'A2', dot: '#9B8FE8' },
+    { name: '스마트 홈 제어판', category: '전시물', beaconId: 'A1', dot: '#F9A8D4' },
+
   ];
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
