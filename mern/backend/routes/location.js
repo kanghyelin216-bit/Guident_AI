@@ -81,11 +81,22 @@ router.post("/", async (req, res) => {
       { x: b.x, y: b.y, txPower: b.txPower },
     ]));
 
-    const readings = beacons.slice(0, 6).map(b => ({
+    // 🟢 향후 비콘 증설 대응을 위해 넉넉히 10개까지 슬라이싱 처리
+    const readings = beacons.slice(0, 10).map(b => ({
       beaconId: String(b.beaconId).trim().toUpperCase(),
       rssi: Number(b.rssi),
       distance: Number(b.distance),
     }));
+
+    // 🟢 [신규 보완] 비콘별 상세 상태 비교 로그 (디버깅 편의성 강화)
+    if (process.env.NODE_ENV !== "production") {
+      console.log("📏 [비콘별 상세]", readings.map(r => ({
+        beaconId: r.beaconId,
+        rssi: r.rssi,
+        distance_m: r.distance,
+        db좌표: beaconMap.get(r.beaconId) ?? "❌ DB에 없음",
+      })));
+    }
 
     const matchedTest = readings.filter(r => beaconMap.has(r.beaconId));
 
@@ -125,13 +136,13 @@ router.post("/", async (req, res) => {
       io.emit("location_update", payload);
     }
 
-    // 🎯 디버그용 콘솔 출력
-    console.log("🎯 [계산된 위치]", result.x, result.y, result.zone);
+    // 🎯 [개선 반영] 서버 터미널 디버그 출력 (어떤 비콘이 쓰였고 신뢰도가 얼마인지 상세 표기)
+    console.log("🎯 [계산된 위치]", result.x, result.y, result.zone, "| 사용된 비콘:", result.usedBeacons, "| 신뢰도:", result.confidence);
 
     // 5. ⚡ [즉시 응답] 안드로이드 앱으로 HTTP OK 응답 반환하여 Network Latency 최소화
     res.json({ status: "ok", scannerId, location: result });
 
-    // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 혼잡도 연산은 응답 후 비동기 처리
+    // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 무거운 혼잡도 연산은 응답 후 비동기 처리
     setImmediate(async () => {
       const io = req.app.get("io");
       
@@ -175,7 +186,7 @@ router.post("/", async (req, res) => {
           io.to(mapId).emit("congestion_update", { mapId, congestion });
           io.emit("congestion_update", { mapId, congestion });
           
-          // 🆕 AI 선제적 트리거 체크 (실제 인원 기준 3명 이상 시 혼잡 판정)
+          // AI 선제적 트리거 체크 (비동기, 응답 지연에 영향 없음)
           const isCongested = (congestion[result.zone] || 0) >= 3; 
           checkProactiveTrigger({
             io,
