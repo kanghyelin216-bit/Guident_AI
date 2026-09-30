@@ -90,7 +90,28 @@ function Header({ activePage, onBack, paired, allMenuItems }) {
 }
 
 /* ── 홈: 전시장 입구 ── */
-function HomeMenu({ items, onNavigate }) {
+/* ── 전시물 목록 (MapSketch.jsx 의 부스 이름·설명과 동일하게 유지) ──
+ * topic: hw = 하드웨어·IoT / ai = AI·소프트웨어 / project = 융합 프로젝트  (추천 화면 분류용)
+ */
+const EXHIBITS = [
+  { beaconId: 'A7', name: 'AI 임베디드 시스템',   author: '온디바이스 AI 체험',   dot: '#6BAED6', topic: 'ai' },
+  { beaconId: 'A6', name: '스마트 센서 네트워크', author: 'IoT 데이터 수집·분석', dot: '#74C476', topic: 'hw' },
+  { beaconId: 'A5', name: '자율주행 로봇',        author: '센서 기반 자율주행',   dot: '#FDAE6B', topic: 'hw' },
+  { beaconId: 'A3', name: 'ICT PBL 프로젝트',     author: '학생 융합 프로젝트',   dot: '#F768A1', topic: 'project' },
+  { beaconId: 'A2', name: '실시간 이미지 분류',   author: '딥러닝 이미지 인식',   dot: '#9B8FE8', topic: 'ai' },
+  { beaconId: 'A1', name: '스마트 홈 제어판',     author: '음성·앱 기반 제어',    dot: '#F9A8D4', topic: 'hw' },
+];
+
+/* 전시물별 "주변 인원" 목록 — 홈·주변 전시물·맞춤 추천이 같은 값을 사용 */
+function useExhibitCrowd() {
+  const congestion = useCongestion(CURRENT_MAP_ID, SERVER_BASE_URL);
+  return EXHIBITS.map((e) => ({ ...e, count: countNearExhibit(congestion, e.beaconId) }));
+}
+
+function HomeMenu({ items, onNavigate, paired }) {
+  const crowd = useExhibitCrowd();
+  const quiet = crowd.reduce((a, b) => (b.count < a.count ? b : a), crowd[0]);
+  const quietLevel = getCongestionLevel(quiet.count);
   const byId = Object.fromEntries(items.map(item => [item.id, item]));
   const nearby = byId.exhibits;
   const chat = byId.chat;
@@ -125,7 +146,7 @@ function HomeMenu({ items, onNavigate }) {
         </button>
         <div style={{ background: '#FAF8F3', padding: '12px 15px', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #DDD8CA' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1D4A78', display: 'inline-block' }} />
-          <span style={{ color: '#43576B', fontSize: 12, fontWeight: 650 }}>현재 위치를 확인했습니다</span>
+          <span style={{ color: '#43576B', fontSize: 12, fontWeight: 650 }}>{paired ? '위치 연동됨 · 내 위치가 지도에 표시돼요' : '위치 미연동 · 스캐너 앱에서 접속하면 연동돼요'}</span>
         </div>
       </section>
 
@@ -141,10 +162,10 @@ function HomeMenu({ items, onNavigate }) {
       </section>
 
       <section style={{ borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: '16px 0' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#78818A', letterSpacing: '0.1em', marginBottom: 8 }}>NEARBY EXHIBIT</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#78818A', letterSpacing: '0.1em', marginBottom: 8 }}>지금 가장 한산한 전시물</div>
         <button onClick={() => onNavigate('exhibits')} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 13, padding: 0, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
           <div style={{ width: 42, height: 42, border: '1px solid #C9D2D7', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1D4A78', flexShrink: 0 }}><MapPin size={20} strokeWidth={1.6} /></div>
-          <div style={{ flex: 1 }}><div style={{ color: '#1C3046', fontSize: 16, fontWeight: 750, letterSpacing: '-0.4px', marginBottom: 3 }}>AI 임베디드 시스템</div><div style={{ color: '#79818A', fontSize: 12 }}>A1 Zone · 현재 위치에서 가까움</div></div>
+          <div style={{ flex: 1 }}><div style={{ color: '#1C3046', fontSize: 16, fontWeight: 750, letterSpacing: '-0.4px', marginBottom: 3 }}>{quiet.name}</div><div style={{ color: '#79818A', fontSize: 12 }}>{quiet.author} · 주변 {quiet.count}명 ({quietLevel.label})</div></div>
           <span style={{ color: '#73808C', fontSize: 21, fontWeight: 300 }}>›</span>
         </button>
       </section>
@@ -162,16 +183,7 @@ function HomeMenu({ items, onNavigate }) {
 
 /* ── 주변 전시물 ── */
 function ExhibitsSection() {
-  const congestion = useCongestion(CURRENT_MAP_ID, SERVER_BASE_URL);
-  const items = [
-    { name: 'AI 임베디드 시스템', category: '전시물', beaconId: 'A7', dot: '#6BAED6' },
-    { name: '스마트 센서 네트워크', category: '전시물', beaconId: 'A6', dot: '#74C476' },
-    { name: '자율주행 로봇', category: '전시물', beaconId: 'A5', dot: '#FDAE6B' },
-    { name: 'ICT PBL 프로젝트', category: '전시물', beaconId: 'A3', dot: '#F768A1' },
-    { name: '실시간 이미지 분류', category: '전시물', beaconId: 'A2', dot: '#9B8FE8' },
-    { name: '스마트 홈 제어판', category: '전시물', beaconId: 'A1', dot: '#F9A8D4' },
-
-  ];
+  const items = useExhibitCrowd();
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>현재 감지된 전시물이에요 👋</p>
@@ -179,7 +191,7 @@ function ExhibitsSection() {
         전시물 반경 {NEARBY_RADIUS_M}m 이내 인원 기준 · {REFRESH_MS / 1000}초마다 갱신
       </p>
       {items.map((item, i) => {
-        const count = countNearExhibit(congestion, item.beaconId);
+        const count = item.count;
         const level = getCongestionLevel(count);
         return (
           <div key={i} style={{
@@ -190,7 +202,7 @@ function ExhibitsSection() {
             <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.dot, flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{item.name}</div>
-              <div style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>{item.category}</div>
+              <div style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>{item.author}</div>
             </div>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 4,
@@ -358,10 +370,19 @@ const handleSend = async (textToSend) => {
 
 /* ── 맞춤 추천 ── */
 function RecommendSection() {
+  const crowd = useExhibitCrowd();
+  const quiet = [...crowd].sort((a, b) => a.count - b.count).slice(0, 2);
+  const busy = crowd.filter((e) => getCongestionLevel(e.count).key === 'high');
+  const line = (e) => `${e.name} (${e.beaconId}) — ${e.author} · 주변 ${e.count}명`;
+  const names = (topic) => crowd.filter((e) => e.topic === topic).map((e) => `${e.name} (${e.beaconId})`).join(' · ');
   const groups = [
-    { emoji: '📍', title: '지금 주변 전시물', color: '#EEF6FB', accent: '#6BAED6', items: ['AI 임베디드 시스템 (A1) — 온디바이스 AI 체험', '딥러닝 이미지 인식 (A5) — 실시간 분류 시연 중'] },
-    { emoji: '🔥', title: '인기 전시물', color: '#FEF9EC', accent: '#FDAE6B', items: ['자율주행 로봇 (A3) — 대기 적음, 지금 바로 체험!', '스마트 홈 제어판 (A6) — 음성·앱 제어 직접 해보기'] },
-    { emoji: '🎯', title: '관심사 기반 추천', color: '#FEF0F5', accent: '#F768A1', items: ['하드웨어에 관심 있다면 → A1 · A2 · A3 구역', 'AI · 소프트웨어라면 → A4 · A5 구역'] },
+    { emoji: '📍', title: '지금 한산한 전시물', color: '#EEF6FB', accent: '#6BAED6', items: quiet.map(line) },
+    { emoji: '🔥', title: '지금 붐비는 전시물', color: '#FEF9EC', accent: '#FDAE6B', items: busy.length ? busy.map(line) : ['지금은 붐비는 전시물이 없어요'] },
+    { emoji: '🎯', title: '관심사 기반 추천', color: '#FEF0F5', accent: '#F768A1', items: [
+      `하드웨어·IoT에 관심 있다면 → ${names('hw')}`,
+      `AI·소프트웨어라면 → ${names('ai')}`,
+      `융합 프로젝트가 궁금하다면 → ${names('project')}`,
+    ] },
   ];
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -434,7 +455,7 @@ export default function App() {
         overflowY: activePage === 'map' ? 'auto' : 'visible'
       }}>
         {activePage === null
-          ? <HomeMenu items={menuItems} onNavigate={setActivePage} />
+          ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
           : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
       </main>
     </div>

@@ -11,7 +11,7 @@ if (typeof window !== "undefined") {
   p5.disableFriendlyErrors = true;
 }
 
-/* 실제 전시장: 가로 8m × 세로 10m / 1m = 75px */
+/* 실제 전시장: 가로 8m × 세로 10m / 1m = 75px (PIXEL_SCALE 은 congestion.js 에서 가져옴) */
 const showGrid = false;
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 750;
@@ -33,7 +33,7 @@ function metersToPixelsRaw(xM, yM) {
   return { x: xM * PIXEL_SCALE, y: yM * PIXEL_SCALE };
 }
 
-/* 고정 전시장 오브젝트 */
+/* 고정 전시장 오브젝트 (부스 좌표는 congestion.js 의 BOOTH_RECT 와 공용) */
 const mapObjects = [
   { x: 94, y: 0, w: 412, h: 40, name: "칠판", type: "etc", desc: "전시 소개, 발표 및 시연 안내가 진행되는 공간입니다." },
 
@@ -64,9 +64,11 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
   const [avoidCongestion, setAvoidCongestion] = useState(false);
   const [navPath, setNavPath] = useState(null);
   const [navMessage, setNavMessage] = useState("");
+
+  /* 혼잡도: { "R01C02": 2, ... } — 3초마다 갱신 + 소켓 즉시 반영 (congestion.js) */
   const congestion = useCongestion(mapId, SERVER_BASE_URL);
 
-  /* 실시간 위치 및 혼잡도 소켓 수신 */
+  /* 실시간 위치 소켓 수신 */
   useEffect(() => {
     if (socketRef.current) return;
 
@@ -186,6 +188,7 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
     }
   }, [navPath]);
 
+  /* 혼잡도 → p5: 칸별 인원(히트맵) + 부스별 주변 인원(부스 색상) */
   useEffect(() => {
     const sk = p5Instance.current;
     if (!sk) return;
