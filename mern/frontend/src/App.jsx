@@ -4,6 +4,7 @@ import { io } from 'socket.io-client';
 import MapSection from './MapSketch'; 
 import AdminBeaconsSection from './AdminBeacons';
 import AdminLogin, { getAdminToken } from './AdminLogin';
+import { useCongestion, getCongestionLevel, countNearExhibit, NEARBY_RADIUS_M, REFRESH_MS } from './congestion';
 
 // 접속한 주소를 기준으로 자동으로 서버 주소를 잡음 (팀원끼리 IP 달라도 안 깨짐)
 const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
@@ -62,39 +63,6 @@ const T = {
   inputBg: '#F3F4F6',   
 };
 
-function getCongestionLevel(count) {
-  if (!count || count === 0) return { label: '여유', color: '#74C476', bg: '#EDF7EE', emoji: '🟢' };
-  if (count <= 2)               return { label: '보통', color: '#FDAE6B', bg: '#FEF9EC', emoji: '🟡' };
-  return                                { label: '혼잡', color: '#F768A1', bg: '#FEF0F5', emoji: '🔴' };
-}
-
-function useCongestion() {
-  const [congestion, setCongestion] = useState({});
-
-  useEffect(() => {
-    const fetchOnce = async () => {
-      try {
-        const res = await fetch(`${SERVER_BASE_URL}/api/location/congestion/${CURRENT_MAP_ID}`);
-        const data = await res.json();
-        setCongestion(data?.congestion || {});
-      } catch (err) {
-        // 에러 소멸 처리
-      }
-    };
-    fetchOnce();
-
-    const socket = io(SERVER_BASE_URL, { transports: ['websocket'] });
-    socket.on('congestion_update', (payload) => {
-      if (payload?.mapId === CURRENT_MAP_ID) {
-        setCongestion(payload.congestion || {});
-      }
-    });
-
-    return () => socket.disconnect();
-  }, []);
-
-  return congestion;
-}
 
 /* ── 헤더 ── */
 function Header({ activePage, onBack, paired, allMenuItems }) {
@@ -194,7 +162,7 @@ function HomeMenu({ items, onNavigate }) {
 
 /* ── 주변 전시물 ── */
 function ExhibitsSection() {
-  const congestion = useCongestion();
+  const congestion = useCongestion(CURRENT_MAP_ID, SERVER_BASE_URL);
   const items = [
     { name: 'AI 임베디드 시스템', category: '전시물', beaconId: 'A7', dot: '#6BAED6' },
     { name: '스마트 센서 네트워크', category: '전시물', beaconId: 'A6', dot: '#74C476' },
@@ -207,8 +175,11 @@ function ExhibitsSection() {
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>현재 감지된 전시물이에요 👋</p>
+      <p style={{ fontSize: 11, color: T.sub, marginTop: -4, marginBottom: 4 }}>
+        전시물 반경 {NEARBY_RADIUS_M}m 이내 인원 기준 · {REFRESH_MS / 1000}초마다 갱신
+      </p>
       {items.map((item, i) => {
-        const count = congestion[item.beaconId] || 0;
+        const count = countNearExhibit(congestion, item.beaconId);
         const level = getCongestionLevel(count);
         return (
           <div key={i} style={{

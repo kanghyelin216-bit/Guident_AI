@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import p5 from "p5";
 import { io } from "socket.io-client";
+import {
+  PIXEL_SCALE, BOOTH_RECT, LEGEND_ITEMS,
+  useCongestion, getCongestionLevel, countNearExhibit, zoneToRectPx,
+} from "./congestion";
 
 if (typeof window !== "undefined") {
   window.p5 = p5;
@@ -11,7 +15,6 @@ if (typeof window !== "undefined") {
 const showGrid = false;
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 750;
-const PIXEL_SCALE = 75;
 
 const SERVER_BASE_URL = typeof window !== "undefined"
   ? `${window.location.protocol}//${window.location.hostname}:4000`
@@ -35,13 +38,13 @@ const mapObjects = [
   { x: 94, y: 0, w: 412, h: 40, name: "칠판", type: "etc", desc: "전시 소개, 발표 및 시연 안내가 진행되는 공간입니다." },
 
   // 실제 비콘 설치 위치 기준: 왼쪽 A1/A2/A3, 오른쪽 A7/A6/A5
-  { x: 0, y: 80, w: 50, h: 110, name: "스마트 홈 제어판", shortName: "작품1", type: "booth", beaconId: "A1", author: "음성·앱 기반 제어", desc: "음성 명령과 모바일 앱으로 조명, 온도, 보안 장치를 제어하는 스마트 홈 시스템 체험 부스입니다." },
-  { x: 0, y: 320, w: 50, h: 110, name: "실시간 이미지 분류", shortName: "작품2", type: "booth", beaconId: "A2", author: "딥러닝 이미지 인식", desc: "카메라로 사물을 촬영하면 딥러닝 모델이 이미지를 분석하여 분류 결과를 실시간으로 보여주는 체험입니다." },
-  { x: 0, y: 560, w: 50, h: 110, name: "ICT PBL 프로젝트", shortName: "작품3", type: "booth", beaconId: "A3", author: "학생 융합 프로젝트", desc: "학생들이 직접 기획하고 개발한 ICT 융합 프로젝트의 결과물을 소개하고 체험할 수 있는 전시입니다." },
+  { ...BOOTH_RECT.A1, name: "스마트 홈 제어판", shortName: "작품1", type: "booth", beaconId: "A1", author: "음성·앱 기반 제어", desc: "음성 명령과 모바일 앱으로 조명, 온도, 보안 장치를 제어하는 스마트 홈 시스템 체험 부스입니다." },
+  { ...BOOTH_RECT.A2, name: "실시간 이미지 분류", shortName: "작품2", type: "booth", beaconId: "A2", author: "딥러닝 이미지 인식", desc: "카메라로 사물을 촬영하면 딥러닝 모델이 이미지를 분석하여 분류 결과를 실시간으로 보여주는 체험입니다." },
+  { ...BOOTH_RECT.A3, name: "ICT PBL 프로젝트", shortName: "작품3", type: "booth", beaconId: "A3", author: "학생 융합 프로젝트", desc: "학생들이 직접 기획하고 개발한 ICT 융합 프로젝트의 결과물을 소개하고 체험할 수 있는 전시입니다." },
 
-  { x: 550, y: 560, w: 50, h: 110, name: "자율주행 로봇", shortName: "작품6", type: "booth", beaconId: "A5", author: "센서 기반 자율주행", desc: "라이다와 카메라 센서로 주변 장애물을 인식하고, 스스로 안전한 경로를 찾아 이동하는 로봇 시연입니다." },
-  { x: 550, y: 320, w: 50, h: 110, name: "스마트 센서 네트워크", shortName: "작품5", type: "booth", beaconId: "A6", author: "IoT 데이터 수집·분석", desc: "온도·습도·조도 등 다양한 센서를 IoT로 연결하고, 실시간 데이터를 수집·분석하는 시스템입니다." },
-  { x: 550, y: 80, w: 50, h: 110, name: "AI 임베디드 시스템", shortName: "작품4", type: "booth", beaconId: "A7", author: "온디바이스 AI 체험", desc: "하드웨어에 AI를 직접 내장하여 인터넷 연결 없이도 동작하는 온디바이스 AI 기술을 체험하는 전시입니다." },
+  { ...BOOTH_RECT.A5, name: "자율주행 로봇", shortName: "작품6", type: "booth", beaconId: "A5", author: "센서 기반 자율주행", desc: "라이다와 카메라 센서로 주변 장애물을 인식하고, 스스로 안전한 경로를 찾아 이동하는 로봇 시연입니다." },
+  { ...BOOTH_RECT.A6, name: "스마트 센서 네트워크", shortName: "작품5", type: "booth", beaconId: "A6", author: "IoT 데이터 수집·분석", desc: "온도·습도·조도 등 다양한 센서를 IoT로 연결하고, 실시간 데이터를 수집·분석하는 시스템입니다." },
+  { ...BOOTH_RECT.A7, name: "AI 임베디드 시스템", shortName: "작품4", type: "booth", beaconId: "A7", author: "온디바이스 AI 체험", desc: "하드웨어에 AI를 직접 내장하여 인터넷 연결 없이도 동작하는 온디바이스 AI 기술을 체험하는 전시입니다." },
 
   { x: 558, y: 0, w: 42, h: 50, name: "출입문", type: "door", desc: "전시장 전면 출입구입니다. 입장 및 퇴장 시 안전에 유의해 주세요." },
   { x: 558, y: 700, w: 42, h: 50, name: "출입문", type: "door", desc: "전시장 후면 출입구 및 비상구입니다. 비상시 안내에 따라 이용해 주세요." },
@@ -61,7 +64,7 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
   const [avoidCongestion, setAvoidCongestion] = useState(false);
   const [navPath, setNavPath] = useState(null);
   const [navMessage, setNavMessage] = useState("");
-  const [congestion, setCongestion] = useState({});
+  const congestion = useCongestion(mapId, SERVER_BASE_URL);
 
   /* 실시간 위치 및 혼잡도 소켓 수신 */
   useEffect(() => {
@@ -74,10 +77,6 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
     socketRef.current.on("connect", () => {
       console.log("🌐 [리액트] 웹소켓 연결 성공!", socketRef.current.id);
       socketRef.current.emit("join_map", { mapId });
-    });
-
-    socketRef.current.on("congestion_update", (payload) => {
-      if (payload?.mapId === mapId) setCongestion(payload.congestion || {});
     });
 
     socketRef.current.on("location_update", (data) => {
@@ -113,14 +112,6 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
       socketRef.current = null;
     };
   }, [mapId, scannerId]);
-
-  /* 지도 진입 시 현재 혼잡도 1회 조회 */
-  useEffect(() => {
-    fetch(`${SERVER_BASE_URL}/api/location/congestion/${mapId}`)
-      .then((res) => res.json())
-      .then((data) => setCongestion(data?.congestion || {}))
-      .catch(() => setCongestion({}));
-  }, [mapId]);
 
   /* 시설 정보 조회 */
   useEffect(() => {
@@ -196,7 +187,12 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
   }, [navPath]);
 
   useEffect(() => {
-    if (p5Instance.current) p5Instance.current.congestion = congestion;
+    const sk = p5Instance.current;
+    if (!sk) return;
+    sk.congestion = congestion;
+    sk.boothCounts = Object.fromEntries(
+      Object.keys(BOOTH_RECT).map((id) => [id, countNearExhibit(congestion, id)])
+    );
   }, [congestion]);
 
   useEffect(() => {
@@ -210,6 +206,7 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
       p.navPathPx = null;
       p.visitorPositionsPx = [];
       p.congestion = {};
+      p.boothCounts = {};
       p.myScannerId = scannerId;
 
       p.setup = () => {
@@ -227,14 +224,43 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
           for (let y = 0; y < p.height; y += 40) p.line(0, y, p.width, y);
         }
 
+        // 혼잡도 히트맵: 사람이 있는 칸만 반투명 색 + 인원수 표시
+        for (const [zone, cnt] of Object.entries(p.congestion)) {
+          const cell = zoneToRectPx(zone);
+          if (!cell || !(cnt > 0)) continue;
+          const lv = getCongestionLevel(cnt);
+          p.push();
+          p.noStroke();
+          p.fill(lv.stroke[0], lv.stroke[1], lv.stroke[2], 90);
+          p.rect(cell.x, cell.y, cell.w, cell.h);
+          p.fill(lv.text[0], lv.text[1], lv.text[2]);
+          p.textSize(11); p.textStyle(p.BOLD);
+          p.text(`${cnt}명`, cell.x + cell.w / 2, cell.y + cell.h / 2);
+          p.pop();
+        }
+
+        // 범례 (왼쪽 아래)
+        p.push();
+        p.textAlign(p.LEFT, p.CENTER);
+        p.textSize(10.5); p.textStyle(p.BOLD);
+        p.noStroke(); p.fill(73, 80, 87);
+        p.text("혼잡도", 62, 706);
+        LEGEND_ITEMS.forEach((item, i) => {
+          const x = 62 + i * 78;
+          p.fill(item.level.stroke[0], item.level.stroke[1], item.level.stroke[2], 150);
+          p.rect(x, 719, 12, 12, 3);
+          p.fill(73, 80, 87); p.textStyle(p.NORMAL);
+          p.text(item.text, x + 17, 725);
+        });
+        p.pop();
+
         for (const obj of mapObjects) {
           p.push();
 
           if (obj.type === "booth") {
-            const count = p.congestion[obj.beaconId] || 0;
-            if (count === 0) { p.fill(237, 247, 238); p.stroke(116, 196, 118); }
-            else if (count === 1) { p.fill(254, 249, 236); p.stroke(253, 174, 107); }
-            else { p.fill(254, 240, 245); p.stroke(247, 104, 161); }
+            const lv = getCongestionLevel(p.boothCounts[obj.beaconId] || 0);
+            p.fill(lv.fill[0], lv.fill[1], lv.fill[2]);
+            p.stroke(lv.stroke[0], lv.stroke[1], lv.stroke[2]);
             p.strokeWeight(2);
           } else if (obj.type === "door") {
             p.fill(241, 243, 245); p.stroke(173, 181, 189); p.strokeWeight(1);
@@ -246,14 +272,13 @@ const MapSketch = ({ scannerId = null, mapId = "6a4e268e4b23f93d45141083" }) => 
           p.noStroke();
 
           if (obj.type === "booth") {
-            const count = p.congestion[obj.beaconId] || 0;
+            const count = p.boothCounts[obj.beaconId] || 0;
+            const lv = getCongestionLevel(count);
             p.fill(73, 80, 87); p.textSize(10.5); p.textStyle(p.BOLD);
             const padding = 4;
             p.text(obj.name, obj.x + padding, obj.y + padding, obj.w - padding * 2, obj.h - padding * 2);
 
-            if (count === 0) p.fill(47, 158, 68);
-            else if (count === 1) p.fill(230, 119, 0);
-            else p.fill(224, 49, 49);
+            p.fill(lv.text[0], lv.text[1], lv.text[2]);
             p.textSize(10); p.textStyle(p.BOLD);
             p.text(`${count}명`, obj.x + obj.w / 2, obj.y + obj.h - 12);
           } else {
