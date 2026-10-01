@@ -1,24 +1,20 @@
-import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft, Settings } from 'lucide-react';
+import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft, ArrowRight, Settings, Navigation, ChevronRight } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
-import MapSection from './MapSketch'; 
+import MapSection from './MapSketch';
 import AdminBeaconsSection from './AdminBeacons';
 import AdminLogin, { getAdminToken } from './AdminLogin';
 import { useCongestion, getCongestionLevel, countNearExhibit, NEARBY_RADIUS_M, REFRESH_MS } from './congestion';
 
-// 접속한 주소를 기준으로 자동으로 서버 주소를 잡음 (팀원끼리 IP 달라도 안 깨짐)
+// 접속한 주소를 기준으로 자동으로 서버 주소를 잡음
 const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
   ? window.location.origin
   : `${window.location.protocol}//${window.location.hostname}:4000`;
-const YOUR_COMPUTER_IP = `${SERVER_BASE_URL}/api/location`; 
 
-// ⚠️ 테스트 중인 지도가 하나뿐이라는 전제로 고정 mapId를 씁니다.
 const CURRENT_MAP_ID = '6a4e268e4b23f93d45141083';
 
 function getOrCreateWebScannerId() {
   const KEY = 'guidant_scanner_id';
-
-  // 🟢 URL 파라미터에서 sid를 안전하게 추출
   if (typeof window !== 'undefined') {
     const urlSid = new URLSearchParams(window.location.search).get('sid');
     if (urlSid) {
@@ -26,7 +22,6 @@ function getOrCreateWebScannerId() {
       return urlSid;
     }
   }
-
   let id = localStorage.getItem(KEY);
   if (!id) {
     id = 'web_' + Math.random().toString(36).slice(2, 10);
@@ -39,60 +34,63 @@ function isPairedWithScanner(scannerId) {
   return typeof scannerId === 'string' && scannerId.startsWith('android_');
 }
 
+function createMessageId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
 const MENU_ITEMS = [
-  { id: 'map',       icon: MapPin,        label: '지도 및 경로 안내', desc: '전시물 위치 확인 & 길찾기',         color: '#EEF6FB', accent: '#6BAED6', emoji: '🗺️' },
-  { id: 'exhibits',  icon: Search,        label: '주변 전시물',       desc: '내 근처 전시물 목록',             color: '#EDF7EE', accent: '#74C476', emoji: '🔍' },
-  { id: 'chat',      icon: MessageSquare, label: 'AI 도우미',          desc: '전시물에 대해 무엇이든 물어보세요', color: '#FEF9EC', accent: '#FDAE6B', emoji: '💬' },
-  { id: 'recommend', icon: TrendingUp,    label: '맞춤 추천',          desc: '관심사 기반 전시물 추천',           color: '#FEF0F5', accent: '#F768A1', emoji: '✨' },
+  { id: 'map',       icon: MapPin,        label: '지도 및 경로 안내' },
+  { id: 'exhibits',  icon: Search,        label: '주변 전시물' },
+  { id: 'chat',      icon: MessageSquare, label: 'AI 도슨트' },
+  { id: 'recommend', icon: TrendingUp,    label: '맞춤 추천' },
 ];
 
 const ADMIN_MENU_ITEM = {
-  id: 'admin', icon: Settings, label: '관리자: 비콘 등록', desc: '지도 클릭으로 비콘 좌표 등록',
-  color: '#F1F3F5', accent: '#495057', emoji: '⚙️',
+  id: 'admin', icon: Settings, label: '관리자: 비콘 등록',
 };
 
 const T = {
-  bg: '#FAF8F3',         // 조금 더 하얗고 투명한 배경
-  card: '#FFFFFF',      
-  border: '#E2E4E1',    
-  radius: '8px',       
-  shadow: '0 2px 8px rgba(15, 23, 42, 0.04)',   
-  shadowMd: '0 6px 16px rgba(15, 23, 42, 0.07)', 
-  text: '#111827',       // 텍스트 컬러를 아주 조금 더 진하게 (거의 블랙)
-  sub: '#6B7280',       
-  inputBg: '#F3F4F6',   
+  bg: '#F7F8FA', card: '#FFFFFF', navy: '#19334F', text: '#172B40',
+  sub: '#687789', border: '#E3E8EF', inputBg: '#F1F4F8', radius: 16,
+  shadow: '0 3px 12px rgba(25,51,79,0.04)',
 };
-
 
 /* ── 헤더 ── */
 function Header({ activePage, onBack, paired, allMenuItems }) {
   const activeMenu = allMenuItems.find(m => m.id === activePage);
   return (
     <header style={{
-      position: 'sticky', top: 0, zIndex: 20, background: 'rgba(250,248,243,0.96)',
-      backdropFilter: 'blur(10px)', borderBottom: `1px solid ${T.border}`,
-      padding: '15px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+      position: 'sticky', top: 0, zIndex: 20, width: '100%', boxSizing: 'border-box',
+      background: 'rgba(247,248,250,0.96)', backdropFilter: 'blur(12px)', borderBottom: `1px solid ${T.border}`,
+      padding: '15px 20px', minHeight: 70, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         {activePage ? (
-          <button aria-label="홈으로 돌아가기" onClick={onBack} style={{ background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 5, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: T.text, flexShrink: 0 }}><ArrowLeft size={18} /></button>
+          <button type="button" aria-label="홈으로 돌아가기" onClick={onBack} style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <ArrowLeft size={19} />
+          </button>
         ) : (
-          <div style={{ width: 33, height: 33, borderRadius: 4, background: '#182B42', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF' }}><MapPin size={18} strokeWidth={1.8} /></div>
+          <div style={{ width: 36, height: 36, borderRadius: 11, background: T.navy, color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Navigation size={19} strokeWidth={2} />
+          </div>
         )}
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 750, color: '#182B42', lineHeight: 1.2, letterSpacing: '-0.4px' }}>{activePage ? activeMenu?.label : 'Guidant'}</div>
-          {!activePage && <div style={{ fontSize: 10, fontWeight: 650, letterSpacing: '0.13em', color: '#77808A', marginTop: 3 }}>EXHIBITION GUIDE</div>}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: activePage ? 16 : 21, fontWeight: 800, color: T.navy, letterSpacing: '-0.6px', lineHeight: 1.2 }}>{activePage ? activeMenu?.label : 'Guidant'}</div>
+          {!activePage && <div style={{ marginTop: 3, fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', color: '#8390A0' }}>YOUR EXHIBITION GUIDE</div>}
         </div>
       </div>
-      <div style={{ fontSize: 11, fontWeight: 650, padding: '6px 8px', borderRadius: 3, flexShrink: 0, color: paired ? '#315E50' : '#8A5A21', background: paired ? '#ECF3EE' : '#FAF3E8', border: `1px solid ${paired ? '#D7E7DE' : '#EDDEC8'}` }}>{paired ? '위치 연동됨' : '위치 미연동'}</div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '7px 9px', borderRadius: 20, fontSize: 10, fontWeight: 700,
+        color: paired ? '#287357' : '#8A642D', background: paired ? '#EAF5EF' : '#FFF4E3', border: `1px solid ${paired ? '#D4EADD' : '#F0E1C9'}`,
+      }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: paired ? '#38936D' : '#C19244' }} />
+        {paired ? '위치 연동됨' : '위치 미연동'}
+      </div>
     </header>
   );
 }
 
-/* ── 홈: 전시장 입구 ── */
-/* ── 전시물 목록 (MapSketch.jsx 의 부스 이름·설명과 동일하게 유지) ──
- * topic: hw = 하드웨어·IoT / ai = AI·소프트웨어 / project = 융합 프로젝트  (추천 화면 분류용)
- */
+/* ── 기존 전시물·비콘 매핑 유지 ── */
 const EXHIBITS = [
   { beaconId: 'A7', name: 'AI 임베디드 시스템',   author: '온디바이스 AI 체험',   dot: '#6BAED6', topic: 'ai' },
   { beaconId: 'A6', name: '스마트 센서 네트워크', author: 'IoT 데이터 수집·분석', dot: '#74C476', topic: 'hw' },
@@ -102,81 +100,100 @@ const EXHIBITS = [
   { beaconId: 'A1', name: '스마트 홈 제어판',     author: '음성·앱 기반 제어',    dot: '#F9A8D4', topic: 'hw' },
 ];
 
-/* 전시물별 "주변 인원" 목록 — 홈·주변 전시물·맞춤 추천이 같은 값을 사용 */
 function useExhibitCrowd() {
   const congestion = useCongestion(CURRENT_MAP_ID, SERVER_BASE_URL);
-  return EXHIBITS.map((e) => ({ ...e, count: countNearExhibit(congestion, e.beaconId) }));
+  return EXHIBITS.map(e => ({ ...e, count: countNearExhibit(congestion, e.beaconId) }));
 }
 
+/* ── 홈: 지도 → 주변 전시물·AI → 한산한 전시 → 추천 ── */
 function HomeMenu({ items, onNavigate, paired }) {
   const crowd = useExhibitCrowd();
   const quiet = crowd.reduce((a, b) => (b.count < a.count ? b : a), crowd[0]);
   const quietLevel = getCongestionLevel(quiet.count);
-  const byId = Object.fromEntries(items.map(item => [item.id, item]));
-  const nearby = byId.exhibits;
-  const chat = byId.chat;
-  const recommend = byId.recommend;
-  const map = byId.map;
-  const admin = byId.admin;
-  const QuickButton = ({ item }) => {
-    if (!item) return null;
-    const Icon = item.icon;
-    return <button onClick={() => onNavigate(item.id)} style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', padding: '13px 3px 11px', cursor: 'pointer', color: '#56697B', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}><Icon size={19} strokeWidth={1.7} /><span style={{ fontSize: 11, fontWeight: 650, whiteSpace: 'nowrap', letterSpacing: '-0.3px' }}>{item.label}</span></button>;
-  };
+  const hasAdmin = items.some(item => item.id === 'admin');
 
   return (
-    <div style={{ padding: '28px 20px 25px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+    <div style={{ padding: '26px 20px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <section>
-        <div style={{ color: '#667786', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', marginBottom: 9 }}>2026 CAPSTONE EXHIBITION</div>
-        <h1 style={{ margin: 0, color: '#182B42', fontSize: 27, fontWeight: 760, lineHeight: 1.35, letterSpacing: '-1px' }}>나의 전시 관람을<br />시작해 보세요.</h1>
-        <p style={{ margin: '10px 0 0', color: '#6E7880', fontSize: 13, lineHeight: 1.6, letterSpacing: '-0.15px' }}>현재 위치를 바탕으로 작품과 체험 공간을 안내합니다.</p>
+        <div style={{ marginBottom: 8, color: '#718196', fontSize: 10, fontWeight: 750, letterSpacing: '0.12em' }}>2026 CAPSTONE EXHIBITION</div>
+        <h1 style={{ margin: 0, fontSize: 27, fontWeight: 800, lineHeight: 1.35, letterSpacing: '-1.1px', color: T.text }}>어디부터 둘러볼까요?</h1>
+        <p style={{ margin: '9px 0 0', fontSize: 13, lineHeight: 1.65, color: T.sub, letterSpacing: '-0.2px' }}>지도와 AI로 전시를 더 편하게 관람하세요.</p>
       </section>
 
-      <section style={{ background: '#E9E5DA', border: '1px solid #DDD8CA', borderRadius: 8, overflow: 'hidden' }}>
-        <button aria-label="전시장 지도 열기" onClick={() => onNavigate('map')} style={{ display: 'block', position: 'relative', width: '100%', height: 183, padding: 0, overflow: 'hidden', background: '#E9E5DA', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-          <div style={{ position: 'absolute', inset: 17, border: '1.5px solid #87909A', borderRadius: 2 }} />
-          <div style={{ position: 'absolute', left: '13%', top: '18%', width: '24%', height: '25%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
-          <div style={{ position: 'absolute', left: '48%', top: '18%', width: '37%', height: '25%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
-          <div style={{ position: 'absolute', left: '13%', top: '59%', width: '31%', height: '23%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
-          <div style={{ position: 'absolute', left: '57%', top: '59%', width: '28%', height: '23%', border: '1.5px solid #87909A', background: 'rgba(250,248,243,0.48)' }} />
-          {[["A1", '25%', '31%'], ["A2", '64%', '31%'], ["A3", '73%', '71%'], ["A5", '29%', '71%']].map(([label, left, top]) => <span key={label} style={{ position: 'absolute', left, top, transform: 'translate(-50%,-50%)', color: '#526273', fontSize: 10, fontWeight: 750, letterSpacing: '0.04em' }}>{label}</span>)}
-          <span style={{ position: 'absolute', left: '49%', top: '52%', width: 32, height: 32, borderRadius: '50%', background: 'rgba(24,43,66,0.14)', transform: 'translate(-50%,-50%)' }} />
-          <span style={{ position: 'absolute', left: '49%', top: '52%', width: 13, height: 13, borderRadius: '50%', background: '#1D4A78', border: '3px solid #FFFFFF', transform: 'translate(-50%,-50%)', boxSizing: 'border-box', boxShadow: '0 1px 4px rgba(24,43,66,0.28)' }} />
-          <span style={{ position: 'absolute', right: 14, bottom: 12, color: '#182B42', background: 'rgba(250,248,243,0.94)', border: '1px solid #D7D1C4', borderRadius: 3, fontSize: 11, fontWeight: 700, padding: '7px 9px' }}>전체 지도 보기 →</span>
-        </button>
-        <div style={{ background: '#FAF8F3', padding: '12px 15px', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #DDD8CA' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1D4A78', display: 'inline-block' }} />
-          <span style={{ color: '#43576B', fontSize: 12, fontWeight: 650 }}>{paired ? '위치 연동됨 · 내 위치가 지도에 표시돼요' : '위치 미연동 · 스캐너 앱에서 접속하면 연동돼요'}</span>
+      <button type="button" onClick={() => onNavigate('map')} style={{
+        position: 'relative', width: '100%', boxSizing: 'border-box', overflow: 'hidden', padding: 22,
+        border: 'none', borderRadius: 18, background: T.navy, color: '#FFFFFF', cursor: 'pointer', textAlign: 'left',
+        boxShadow: '0 8px 20px rgba(25,51,79,0.14)',
+      }}>
+        <div aria-hidden="true" style={{ position: 'absolute', right: -28, top: -36, width: 150, height: 150, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.09)', pointerEvents: 'none' }} />
+        <div aria-hidden="true" style={{ position: 'absolute', right: -5, top: -13, width: 105, height: 105, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.09)', pointerEvents: 'none' }} />
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginBottom: 11, color: '#BDD0E3', fontSize: 11, fontWeight: 650 }}><Navigation size={12} />관람 시작하기</div>
+            <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-0.7px', marginBottom: 7 }}>전시장 지도</div>
+            <div style={{ color: '#C3D1DE', fontSize: 13, lineHeight: 1.6 }}>전시물 위치와 관람 동선을<br />한눈에 확인하세요.</div>
+          </div>
+          <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, background: 'rgba(255,255,255,0.11)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MapPin size={25} strokeWidth={1.7} />
+          </div>
         </div>
-      </section>
-
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button onClick={() => onNavigate('chat')} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 13, padding: '17px 15px', background: '#203B58', border: '1px solid #203B58', borderRadius: 7, cursor: 'pointer', textAlign: 'left', color: '#FFFFFF' }}>
-          <div style={{ width: 39, height: 39, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><MessageSquare size={19} strokeWidth={1.7} /></div>
-          <div style={{ flex: 1 }}><div style={{ fontSize: 15, fontWeight: 750, letterSpacing: '-0.35px', marginBottom: 4 }}>AI 도슨트에게 물어보기</div><div style={{ color: '#C8D5E1', fontSize: 12, lineHeight: 1.45 }}>작품, 체험 방법, 관람 동선을 바로 질문하세요</div></div>
-          <span style={{ color: '#D6E0E9', fontSize: 21, fontWeight: 300 }}>›</span>
-        </button>
-        <div style={{ display: 'flex', gap: 7, paddingLeft: 2, overflowX: 'auto' }}>
-          {['이 작품은 무엇인가요?', '체험 방법 알려줘'].map(question => <button key={question} onClick={() => onNavigate('chat')} style={{ whiteSpace: 'nowrap', color: '#53697E', background: '#F2F1EC', border: '1px solid #E1DED3', borderRadius: 20, padding: '7px 10px', fontSize: 11, cursor: 'pointer' }}>{question}</button>)}
+        <div style={{ position: 'relative', marginTop: 20, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13, fontWeight: 750 }}>지도 보기</span><ArrowRight size={18} />
         </div>
-      </section>
+      </button>
 
-      <section style={{ borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: '16px 0' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#78818A', letterSpacing: '0.1em', marginBottom: 8 }}>지금 가장 한산한 전시물</div>
-        <button onClick={() => onNavigate('exhibits')} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 13, padding: 0, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-          <div style={{ width: 42, height: 42, border: '1px solid #C9D2D7', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1D4A78', flexShrink: 0 }}><MapPin size={20} strokeWidth={1.6} /></div>
-          <div style={{ flex: 1 }}><div style={{ color: '#1C3046', fontSize: 16, fontWeight: 750, letterSpacing: '-0.4px', marginBottom: 3 }}>{quiet.name}</div><div style={{ color: '#79818A', fontSize: 12 }}>{quiet.author} · 주변 {quiet.count}명 ({quietLevel.label})</div></div>
-          <span style={{ color: '#73808C', fontSize: 21, fontWeight: 300 }}>›</span>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+        <button type="button" onClick={() => onNavigate('exhibits')} style={{ minWidth: 0, padding: '18px 16px', borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, textAlign: 'left', cursor: 'pointer', boxShadow: T.shadow }}>
+          <div style={{ width: 40, height: 40, marginBottom: 15, borderRadius: 12, background: '#EAF3EF', color: '#32755E', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Search size={21} strokeWidth={1.8} /></div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: T.text, letterSpacing: '-0.5px', marginBottom: 6 }}>주변 전시물</div>
+          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5, marginBottom: 17 }}>작품과 혼잡도 확인</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#32755E', fontSize: 12, fontWeight: 750 }}>작품 보기<ArrowRight size={15} /></div>
+        </button>
+        <button type="button" onClick={() => onNavigate('chat')} style={{ minWidth: 0, padding: '18px 16px', borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, textAlign: 'left', cursor: 'pointer', boxShadow: T.shadow }}>
+          <div style={{ width: 40, height: 40, marginBottom: 15, borderRadius: 12, background: '#EEF0FC', color: '#6361AC', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><MessageSquare size={21} strokeWidth={1.8} /></div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: T.text, letterSpacing: '-0.5px', marginBottom: 6 }}>AI 도슨트</div>
+          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5, marginBottom: 17 }}>궁금한 내용을 질문</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#6361AC', fontSize: 12, fontWeight: 750 }}>질문하기<ArrowRight size={15} /></div>
         </button>
       </section>
 
-      <section style={{ display: 'flex', alignItems: 'stretch', border: `1px solid ${T.border}`, borderRadius: 6, overflow: 'hidden', background: '#FCFBF8' }}>
-        <QuickButton item={map} /><div style={{ width: 1, background: T.border, margin: '11px 0' }} />
-        <QuickButton item={nearby} /><div style={{ width: 1, background: T.border, margin: '11px 0' }} />
-        <QuickButton item={chat} />
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11, gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.text, letterSpacing: '-0.4px' }}>지금 한산한 전시</h2>
+          <span style={{ fontSize: 10, color: T.sub, flexShrink: 0 }}>{REFRESH_MS / 1000}초마다 갱신</span>
+        </div>
+        <button type="button" onClick={() => onNavigate('exhibits')} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '17px 15px', border: `1px solid ${T.border}`, borderRadius: T.radius, background: T.card, cursor: 'pointer', textAlign: 'left', boxShadow: T.shadow }}>
+          <div style={{ width: 44, height: 48, flexShrink: 0, borderRadius: 11, background: '#F0F4F8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, color: T.navy }}>
+            <MapPin size={17} /><span style={{ fontSize: 10, fontWeight: 800 }}>{quiet.beaconId}</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 750, color: T.text, letterSpacing: '-0.3px', lineHeight: 1.4 }}>{quiet.name}</div>
+            <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.sub }}>{quiet.author}</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, padding: '4px 7px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: quietLevel.bg, color: quietLevel.color }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: quietLevel.color }} />주변 {quiet.count}명 · {quietLevel.label}
+            </div>
+          </div>
+          <ChevronRight size={18} color="#8A97A6" style={{ flexShrink: 0 }} />
+        </button>
       </section>
-      {recommend && <button onClick={() => onNavigate('recommend')} style={{ background: 'transparent', border: 'none', padding: 0, color: '#6F7B87', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 4, fontSize: 12, alignSelf: 'center' }}>맞춤 관람 추천 보기</button>}
-      {admin && <button onClick={() => onNavigate('admin')} style={{ width: '100%', background: 'transparent', border: `1px dashed ${T.border}`, borderRadius: 5, padding: '11px 12px', color: '#66717B', cursor: 'pointer', fontSize: 12, textAlign: 'left' }}>관리자 도구 · 비콘 위치 등록 <span style={{ float: 'right' }}>›</span></button>}
+
+      <button type="button" onClick={() => onNavigate('recommend')} style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '15px 16px', background: '#EDF1F6', border: '1px solid #E1E7EF', borderRadius: 12, cursor: 'pointer', textAlign: 'left', color: T.navy }}>
+        <TrendingUp size={19} strokeWidth={1.8} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 750, marginBottom: 3 }}>나에게 맞는 전시 찾기</div>
+          <div style={{ fontSize: 11, color: T.sub }}>관심사와 혼잡도로 추천받으세요.</div>
+        </div>
+        <ChevronRight size={17} />
+      </button>
+
+      <p style={{ margin: 0, textAlign: 'center', color: '#778597', fontSize: 11, lineHeight: 1.65 }}>
+        {paired ? '스캐너와 연동되어 지도에서 내 위치를 확인할 수 있어요.' : '스캐너 앱에서 접속하면 내 위치가 지도에 표시돼요.'}
+      </p>
+      {hasAdmin && (
+        <button type="button" onClick={() => onNavigate('admin')} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', border: '1px dashed #CCD5DF', borderRadius: 10, background: 'transparent', color: T.sub, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+          <Settings size={16} /><span style={{ flex: 1 }}>관리자 도구 · 비콘 등록</span><ChevronRight size={15} />
+        </button>
+      )}
     </div>
   );
 }
@@ -185,33 +202,26 @@ function HomeMenu({ items, onNavigate, paired }) {
 function ExhibitsSection() {
   const items = useExhibitCrowd();
   return (
-    <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>현재 감지된 전시물이에요 👋</p>
-      <p style={{ fontSize: 11, color: T.sub, marginTop: -4, marginBottom: 4 }}>
-        전시물 반경 {NEARBY_RADIUS_M}m 이내 인원 기준 · {REFRESH_MS / 1000}초마다 갱신
-      </p>
-      {items.map((item, i) => {
-        const count = item.count;
-        const level = getCongestionLevel(count);
+    <div style={{ padding: '22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ marginBottom: 5 }}>
+        <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: T.text, letterSpacing: '-0.7px' }}>전시물을 둘러보세요.</h2>
+        <p style={{ margin: 0, fontSize: 12, color: T.sub, lineHeight: 1.7 }}>전시물 반경 {NEARBY_RADIUS_M}m 이내 인원 기준<br />{REFRESH_MS / 1000}초마다 혼잡도가 갱신됩니다.</p>
+      </div>
+      {items.map(item => {
+        const level = getCongestionLevel(item.count);
         return (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 14,
-            padding: '14px 16px', background: T.card,
-            borderRadius: T.radius, border: `1.5px solid ${T.border}`, boxShadow: T.shadow,
-          }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.dot, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{item.name}</div>
-              <div style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>{item.author}</div>
+          <div key={item.beaconId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '17px 14px', background: T.card, borderRadius: T.radius, border: `1px solid ${T.border}`, boxShadow: T.shadow }}>
+            <div style={{ width: 39, height: 43, flexShrink: 0, borderRadius: 10, background: '#F1F4F8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: item.dot }} />
+              <span style={{ fontSize: 10, fontWeight: 800, color: T.navy }}>{item.beaconId}</span>
             </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 11, fontWeight: 600, color: level.color,
-              background: level.bg, borderRadius: 8, padding: '4px 10px',
-              flexShrink: 0,
-            }}>
-              {level.emoji} {level.label}
-              <span style={{ color: T.sub, fontWeight: 400 }}> · {count}명</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 750, color: T.text, lineHeight: 1.4 }}>{item.name}</div>
+              <div style={{ fontSize: 11, color: T.sub, marginTop: 5, lineHeight: 1.5 }}>{item.author}</div>
+            </div>
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontSize: 10, fontWeight: 750, color: level.color, background: level.bg, padding: '5px 8px', borderRadius: 7, whiteSpace: 'nowrap' }}>{level.label}</span>
+              <span style={{ fontSize: 10, color: T.sub }}>{item.count}명</span>
             </div>
           </div>
         );
@@ -220,147 +230,138 @@ function ExhibitsSection() {
   );
 }
 
-/* ── AI 도우미 ── */
+/* ── AI 도슨트 ── */
 function ChatSection({ scannerId }) {
   const [chatMessage, setChatMessage] = useState('');
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [messages, setMessages] = useState([
-    { id: 1, sender: 'bot', text: '안녕하세요! 전시물에 대해 궁금한 점을 무엇이든 물어보세요 😊' }
+    { id: 'greeting', sender: 'bot', text: '안녕하세요! Guidant AI 도슨트입니다. 전시물이나 체험 방법에 대해 궁금한 점을 물어보세요.' }
   ]);
 
-  // 🆕 (1) 마운트 시 과거 대화 이력 로드 (포맷 매칭: sender, text)
+  // 과거 대화 이력 로드
   useEffect(() => {
     if (!scannerId) return;
-    fetch(`${SERVER_BASE_URL}/api/chat/${scannerId}`)
-      .then((res) => res.json())
-      .then((history) => {
-        if (Array.isArray(history)) {
-          setMessages(prev => [
-            prev[0], // 인사말 유지
-            ...history.map((h, i) => ({
-              id: Date.now() + i, // 고유 id 부여
-              sender: h.role === 'user' ? 'user' : 'bot',
-              text: h.message,
-              zone: h.zone,
-            }))
-          ]);
-        }
+    let cancelled = false;
+
+    fetch(`${SERVER_BASE_URL}/api/chat/${encodeURIComponent(scannerId)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('대화 이력 요청 실패');
+        return res.json();
       })
-      .catch((err) => console.error("히스토리 로드 실패:", err));
+      .then(history => {
+        if (cancelled || !Array.isArray(history)) return;
+        setMessages(prev => [
+          prev[0],
+          ...history.map((h, i) => ({
+            id: `history_${scannerId}_${i}`, sender: h.role === 'user' ? 'user' : 'bot', text: h.message, zone: h.zone,
+          }))
+        ]);
+      })
+      .catch(err => console.error('히스토리 로드 실패:', err));
+
+    return () => { cancelled = true; };
   }, [scannerId]);
 
-  // 🆕 (2) AI 선제적 메시지 수신
+  // AI 선제적 메시지 수신
   useEffect(() => {
-    const socket = io(SERVER_BASE_URL, { transports: ["websocket"] });
-    socket.emit("join_map", { mapId: CURRENT_MAP_ID }); // 객체 포맷 유지
-
-    const handler = (payload) => {
-      if (!payload || payload.scannerId !== scannerId) return; // 본인 것만 반영
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now(), sender: 'bot', text: payload.message, zone: payload.zone },
+    if (!scannerId) return;
+    const socket = io(SERVER_BASE_URL, { transports: ['websocket'] });
+    const joinMap = () => socket.emit('join_map', { mapId: CURRENT_MAP_ID });
+    const handler = payload => {
+      if (!payload || payload.scannerId !== scannerId) return;
+      setMessages(prev => [
+        ...prev, { id: createMessageId('proactive'), sender: 'bot', text: payload.message, zone: payload.zone },
       ]);
     };
-    
-    socket.on("proactive_message", handler);
-    
+
+    socket.on('connect', joinMap);
+    socket.on('proactive_message', handler);
     return () => {
-      socket.off("proactive_message", handler);
+      socket.off('connect', joinMap);
+      socket.off('proactive_message', handler);
       socket.disconnect();
     };
   }, [scannerId]);
 
-const handleSend = async (textToSend) => {
-    const userText = textToSend || chatMessage;
-    if (!userText.trim()) return;
+  const handleSend = async textToSend => {
+    const userText = (textToSend || chatMessage).trim();
+    if (!userText) return;
 
-    // 🟢 Date.now() 대신 random을 조합하여 완전히 고유한 ID 생성
-    const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const loadId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-
-    setMessages(prev => [...prev, { id: userMsgId, sender: 'user', text: userText }]);
+    const userMsgId = createMessageId('user');
+    const loadId = createMessageId('bot');
+    setMessages(prev => [
+      ...prev,
+      { id: userMsgId, sender: 'user', text: userText },
+      { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' },
+    ]);
     setChatMessage('');
-    
-    setMessages(prev => [...prev, { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' }]);
 
     try {
       const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, scannerId: getOrCreateWebScannerId() }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userText, scannerId }),
       });
+      if (!res.ok) throw new Error('채팅 요청 실패');
       const data = await res.json();
-      
-      // 백엔드 응답(data.reply)으로 로딩 메시지 교체
       setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: data.reply || '응답을 받지 못했습니다.' } : m));
     } catch {
-      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: '서버와 연결이 원활하지 않습니다. 통합 백엔드가 4000포트에서 작동 중인지 확인하세요!' } : m));
+      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: '서버와 연결이 원활하지 않습니다. 백엔드 서버 연결을 확인해 주세요.' } : m));
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 57px)', background: '#F4F6FD' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {messages.map((msg) => (
-          <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.sender === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div style={{
-              maxWidth: '78%', padding: '11px 16px', borderRadius: 18, fontSize: 13, lineHeight: 1.55,
-              ...(msg.sender === 'user'
-                ? { background: 'linear-gradient(135deg,#6BAED6,#74C476)', color: 'white', borderTopRightRadius: 5, boxShadow: '0 2px 10px rgba(107,174,214,0.35)' }
-                : { background: T.card, color: T.text, borderTopLeftRadius: 5, border: `1px solid ${T.border}`, boxShadow: T.shadow }
-              ),
-            }}>
-              {msg.text}
-            </div>
-            {msg.sender === 'bot' && msg.id === 1 && !isVoiceMode && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingLeft: 2 }}>
-                {['이 전시물은 뭔가요?', '체험 방법 알려줘'].map(chip => (
-                  <button key={chip} onClick={() => handleSend(chip)} style={{
-                    padding: '6px 13px', background: T.card, border: `1px solid ${T.border}`,
-                    borderRadius: 20, fontSize: 11, color: T.text, fontWeight: 500, cursor: 'pointer', boxShadow: T.shadow,
-                  }}>{chip}</button>
-                ))}
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 70px)', minHeight: 350, background: T.bg }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {messages.map(msg => {
+          const isUser = msg.sender === 'user';
+          return (
+            <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+              {!isUser && <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6, paddingLeft: 3, color: T.sub, fontSize: 10, fontWeight: 700 }}><MessageSquare size={11} />Guidant</div>}
+              <div style={{
+                maxWidth: '84%', boxSizing: 'border-box', padding: '13px 15px', borderRadius: 16,
+                fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                ...(isUser
+                  ? { background: T.navy, color: '#FFFFFF', borderTopRightRadius: 5 }
+                  : { background: T.card, color: T.text, borderTopLeftRadius: 5, border: `1px solid ${T.border}`, boxShadow: T.shadow }),
+              }}>
+                {msg.text}
               </div>
-            )}
-          </div>
-        ))}
+              {msg.id === 'greeting' && !isVoiceMode && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 10 }}>
+                  {['이 전시물은 뭔가요?', '체험 방법 알려줘'].map(chip => (
+                    <button type="button" key={chip} onClick={() => handleSend(chip)} style={{ padding: '8px 11px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 20, fontSize: 11, color: T.navy, cursor: 'pointer' }}>{chip}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div style={{ background: T.card, borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 20px rgba(100,120,180,0.08)', padding: '16px 16px 28px', position: 'relative' }}>
+      <div style={{ flexShrink: 0, background: T.card, borderTop: `1px solid ${T.border}`, padding: '14px 16px max(18px, env(safe-area-inset-bottom))' }}>
         {isVoiceMode && (
-          <div style={{ position: 'absolute', top: -48, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 20 }}>
-            <button onClick={() => setIsVoiceMode(false)} style={{
-              width: 76, height: 76, borderRadius: '50%',
-              background: 'linear-gradient(135deg,#6BAED6,#74C476)',
-              border: '4px solid white', boxShadow: T.shadowMd,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-            }}>
-              <Mic size={30} color="white" />
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, padding: '11px 12px', background: '#F1F4F8', borderRadius: 10, color: T.sub, fontSize: 11 }}>
+            <span>음성 입력 기능은 준비 중입니다.</span>
+            <button type="button" onClick={() => setIsVoiceMode(false)} style={{ border: 'none', background: 'transparent', color: T.navy, fontSize: 11, fontWeight: 750, cursor: 'pointer', flexShrink: 0 }}>닫기</button>
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, ...(isVoiceMode ? { marginTop: 40, opacity: 0.4, pointerEvents: 'none' } : {}) }}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: T.inputBg, borderRadius: 24, padding: '9px 16px', border: `1px solid ${T.border}` }}>
-            <input type="text" placeholder="메시지 입력" value={chatMessage}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0, background: T.inputBg, borderRadius: 12, padding: '12px 13px', border: `1px solid ${T.border}` }}>
+            <input type="text" aria-label="AI 도슨트에게 메시지 입력" placeholder="궁금한 내용을 입력하세요" value={chatMessage}
               onChange={e => setChatMessage(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
-              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: T.text }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              style={{ width: '100%', minWidth: 0, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: T.text, padding: 0, fontFamily: 'inherit' }}
             />
           </div>
-          <button onClick={() => handleSend()} style={{
-            width: 40, height: 40, borderRadius: '50%',
-            background: 'linear-gradient(135deg,#6BAED6,#74C476)',
-            border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 10px rgba(107,174,214,0.4)',
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white" style={{ transform: 'rotate(90deg)', marginLeft: 2 }}>
-              <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
-            </svg>
+          <button type="button" aria-label="메시지 보내기" onClick={() => handleSend()} style={{ width: 42, height: 42, borderRadius: 12, background: T.navy, color: '#FFFFFF', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ArrowRight size={20} />
           </button>
-          <button onClick={() => setIsVoiceMode(true)} style={{
-            width: 40, height: 40, borderRadius: '50%', background: T.inputBg,
-            border: `1px solid ${T.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Mic size={16} color={T.sub} />
+          <button type="button" aria-label="음성 입력 안내" onClick={() => setIsVoiceMode(prev => !prev)} style={{ width: 38, height: 42, borderRadius: 12, background: T.inputBg, border: `1px solid ${T.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Mic size={17} color={T.sub} />
           </button>
         </div>
       </div>
@@ -372,44 +373,50 @@ const handleSend = async (textToSend) => {
 function RecommendSection() {
   const crowd = useExhibitCrowd();
   const quiet = [...crowd].sort((a, b) => a.count - b.count).slice(0, 2);
-  const busy = crowd.filter((e) => getCongestionLevel(e.count).key === 'high');
-  const line = (e) => `${e.name} (${e.beaconId}) — ${e.author} · 주변 ${e.count}명`;
-  const names = (topic) => crowd.filter((e) => e.topic === topic).map((e) => `${e.name} (${e.beaconId})`).join(' · ');
+  const busy = crowd.filter(e => getCongestionLevel(e.count).key === 'high');
+  const line = e => `${e.name} (${e.beaconId}) — ${e.author} · 주변 ${e.count}명`;
+  const names = topic => crowd.filter(e => e.topic === topic).map(e => `${e.name} (${e.beaconId})`).join(' · ');
   const groups = [
-    { emoji: '📍', title: '지금 한산한 전시물', color: '#EEF6FB', accent: '#6BAED6', items: quiet.map(line) },
-    { emoji: '🔥', title: '지금 붐비는 전시물', color: '#FEF9EC', accent: '#FDAE6B', items: busy.length ? busy.map(line) : ['지금은 붐비는 전시물이 없어요'] },
-    { emoji: '🎯', title: '관심사 기반 추천', color: '#FEF0F5', accent: '#F768A1', items: [
+    { icon: MapPin, title: '지금 한산한 전시물', bg: '#EAF3EF', accent: '#32755E', items: quiet.map(line) },
+    { icon: TrendingUp, title: '지금 붐비는 전시물', bg: '#FFF3E4', accent: '#A47030', items: busy.length ? busy.map(line) : ['지금은 붐비는 전시물이 없어요.'] },
+    { icon: Search, title: '관심사 기반 추천', bg: '#EEF0FC', accent: '#6361AC', items: [
       `하드웨어·IoT에 관심 있다면 → ${names('hw')}`,
       `AI·소프트웨어라면 → ${names('ai')}`,
       `융합 프로젝트가 궁금하다면 → ${names('project')}`,
     ] },
   ];
+
   return (
-    <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <p style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>나에게 딱 맞는 전시물을 찾아봐요 🎉</p>
-      {groups.map((g, i) => (
-        <div key={i} style={{ background: T.card, borderRadius: T.radius, border: `1.5px solid ${T.border}`, boxShadow: T.shadow, overflow: 'hidden' }}>
-          <div style={{ background: g.color, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16 }}>{g.emoji}</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: g.accent }}>{g.title}</span>
-          </div>
-          <div style={{ padding: '10px 16px 14px' }}>
-            {g.items.map((item, j) => (
-              <div key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0' }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: g.accent, marginTop: 6, flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: T.text, lineHeight: 1.5 }}>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+    <div style={{ padding: '22px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ marginBottom: 3 }}>
+        <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: T.text, letterSpacing: '-0.7px' }}>나에게 맞는 전시를 찾아요.</h2>
+        <p style={{ margin: 0, color: T.sub, fontSize: 12, lineHeight: 1.7 }}>실시간 혼잡도와 관심 분야를 기준으로 안내합니다.</p>
+      </div>
+      {groups.map(g => {
+        const Icon = g.icon;
+        return (
+          <section key={g.title} style={{ background: T.card, borderRadius: T.radius, border: `1px solid ${T.border}`, boxShadow: T.shadow, overflow: 'hidden' }}>
+            <div style={{ background: g.bg, padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 8, color: g.accent }}>
+              <Icon size={18} strokeWidth={1.8} /><span style={{ fontSize: 14, fontWeight: 800 }}>{g.title}</span>
+            </div>
+            <div style={{ padding: '12px 16px 16px' }}>
+              {g.items.map((item, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '7px 0' }}>
+                  <span style={{ width: 5, height: 5, marginTop: 8, borderRadius: '50%', background: g.accent, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: T.text, lineHeight: 1.8, overflowWrap: 'anywhere' }}>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
 
-/* ── 관리자 접근 게이트: 토큰 없으면 로그인 화면, 있으면 관리자 화면 ── */
+/* ── 관리자 접근 게이트 ── */
 function AdminGate(props) {
-  const [authed, setAuthed] = useState(!!getAdminToken());
+  const [authed, setAuthed] = useState(() => !!getAdminToken());
   if (!authed) return <AdminLogin onSuccess={() => setAuthed(true)} />;
   return <AdminBeaconsSection {...props} />;
 }
@@ -420,45 +427,34 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [scannerId, setScannerId] = useState(() => getOrCreateWebScannerId());
 
-  // 🟢 [추가 효과] 안드로이드 앱에서 접속 시 실시간으로 바뀐 URL의 ?sid= 파라미터를 읽어오도록 동기화 보강
+  // 안드로이드 앱에서 전달한 sid 동기화
   useEffect(() => {
     const urlSid = new URLSearchParams(window.location.search).get('sid');
     if (urlSid && urlSid !== scannerId) {
+      localStorage.setItem('guidant_scanner_id', urlSid);
       setScannerId(urlSid);
     }
-  }, [activePage]);
+  }, [activePage, scannerId]);
 
   const paired = isPairedWithScanner(scannerId);
   const ActiveSection = activePage ? SECTION_MAP[activePage] : null;
-
   const isAdmin = new URLSearchParams(window.location.search).get('admin') === '1';
   const menuItems = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS;
 
   return (
-  <div style={{
-    width: '100%',            // 👈 100vw의 스크롤바 때문에 쏠리는 현상 방지
-    minHeight: '100vh',
-    background: T.bg,
-    overflowY: activePage === 'map' ? 'hidden' : 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center'      // 👈 모바일 컨테이너를 화면 중앙으로 딱 잡아줌!
-  }}>
-    {/* 헤더와 메인이 화면 전체 폭을 쓰되 정렬되도록 감싸기 */}
-    <div style={{ width: '100%', maxWidth: activePage === 'map' ? 'none' : 480, display: 'flex', flexDirection: 'column', flex: 1 }}>
-      <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} allMenuItems={menuItems} />
-
-      <main style={{
-        width: '100%',
-        margin: '0 auto',
-        flex: 1,
-        overflowY: activePage === 'map' ? 'auto' : 'visible'
-      }}>
-        {activePage === null
-          ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
-          : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
-      </main>
+    <div style={{
+      width: '100%', minHeight: '100vh', background: T.bg, display: 'flex', flexDirection: 'column', alignItems: 'center',
+      overflowY: activePage === 'map' ? 'hidden' : 'auto',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
+    }}>
+      <div style={{ width: '100%', maxWidth: activePage === 'map' ? 'none' : 480, display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+        <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} allMenuItems={menuItems} />
+        <main style={{ width: '100%', margin: '0 auto', flex: 1, minWidth: 0, overflowY: activePage === 'map' ? 'auto' : 'visible' }}>
+          {activePage === null
+            ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
+            : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
+        </main>
+      </div>
     </div>
-  </div>
   );
-};
+}
