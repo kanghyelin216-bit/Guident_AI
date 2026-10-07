@@ -100,7 +100,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       transports: ['websocket'],
       upgrade: false,
       forceNew: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
     });
 
     socketRef.current.on('connect', () => {

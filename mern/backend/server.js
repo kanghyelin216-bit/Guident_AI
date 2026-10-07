@@ -25,6 +25,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import compression from "compression";
 
 // 2. 라우터 임포트 (기존 몽고DB 기반 라우터들)
 import locationRoutes  from "./routes/location.js";
@@ -57,6 +58,7 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+app.use(compression());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // 🔌 라우터들이 req.app.get('io')로 소켓 서버에 접근할 수 있도록 등록
@@ -96,6 +98,7 @@ app.use("/api/auth",       authRoutes);
 // 배포용: 빌드된 웹앱(React)을 이 서버가 함께 제공
 const clientDist = path.join(__dirname, "../frontend/dist");
 if (fs.existsSync(clientDist)) {
+  app.use("/assets", express.static(path.join(clientDist, "assets"), { maxAge: "365d", immutable: true }));
   app.use(express.static(clientDist));
   app.use((req, res, next) => {
     if (req.method !== "GET" || /^\/(api|uploads|socket\.io|health)/.test(req.path)) return next();

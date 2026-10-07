@@ -100,4 +100,4 @@ export default class WeightedCentroid {
     const now = Date.now();
     for (const [id, s] of this.states) if (now - s.ts > 60000) this.states.delete(id);
   }
-}sss
+}
