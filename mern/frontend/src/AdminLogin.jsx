@@ -1,8 +1,9 @@
 // AdminLogin.jsx
 import { useState } from 'react';
-import { API_BASE as SERVER_BASE_URL } from './config';
 
-
+const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
+  ? window.location.origin
+  : `${window.location.protocol}//${window.location.hostname}:4000`;
 
 const T = {
   card: '#FFFFFF', border: '#EEF0F6', radius: '14px',

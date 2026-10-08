@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAdminToken, ADMIN_TOKEN_KEY } from './AdminLogin';
-import { API_BASE } from './config';
 
-const YOUR_COMPUTER_IP = API_BASE;
+const YOUR_COMPUTER_IP = process.env.NODE_ENV === 'production' 
+  ? window.location.origin 
+  : (window.location.port === '5173' || window.location.port === '3000'
+      ? `${window.location.protocol}//${window.location.hostname}:4000`
+      : 'http://172.18.41.69:4000');
 
 // 🔐 관리자 토큰 자동 처리 authFetch 래퍼
 async function authFetch(url, options = {}) {

@@ -9,7 +9,6 @@ import {
   BOOTH_RECT,
   LEGEND_ITEMS
 } from "./congestion";
-import { API_BASE as SERVER_BASE_URL } from "./config";
 
 if (typeof window !== 'undefined') {
   window.p5 = p5; 
@@ -30,7 +29,9 @@ const BASE_HEIGHT = GRID_ROWS * PIXEL_SCALE;  // 750px
 // 🔵 테스트용 임의의 내 위치 (4m, 8m 지점 -> x: 300px, y: 600px)
 const DEFAULT_MOCK_USER_POS = { x: 300, y: 600 };
 
-
+const SERVER_BASE_URL = typeof window !== 'undefined'
+  ? `${window.location.protocol}//${window.location.hostname}:4000`
+  : 'http://localhost:4000';
 
 function metersToPixels(xM, yM) {
   const px = xM * PIXEL_SCALE;
@@ -60,7 +61,7 @@ const mapObjects = [
   {x: 558, y: 700, w: 42, h: 50, name: '출입문', type: 'door', desc: '전시장 후면 출입구 및 비상구입니다.'},
 ];
 
-const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => {
+const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083', onAskAI }) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   
@@ -100,7 +101,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
       transports: ['websocket'],
       upgrade: false,
       forceNew: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 5,
     });
 
     socketRef.current.on('connect', () => {
@@ -156,18 +157,15 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
     return () => { cancelled = true; };
   }, [mapId]);
 
-  const askAI = async (questionText, targetNameKorean) => {
-    try {
-      await fetch(`${SERVER_BASE_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scannerId, mapId, zone: currentZone, targetName: targetNameKorean, message: questionText
-        }),
-      });
-    } catch (err) {
-      console.error("AI 챗봇 API 요청 실패:", err);
-    }
+  /* 🤖 AI 도슨트로 이동 (질문 전송은 ChatSection이 담당) */
+  const handleAskAI = (artwork) => {
+    if (!artwork) return;
+    onAskAI?.({
+      question: `${artwork.name}에 대해 더 자세히 알려줘`,
+      targetName: artwork.name,
+      zone: currentZone,
+    });
+    setSelectedArtwork(null);
   };
 
   /* 🧭 길안내 동선 계산 */
@@ -551,7 +549,7 @@ const MapSketch = ({ scannerId = null, mapId = '6a4e268e4b23f93d45141083' }) => 
             </button>
             <button 
               style={{...styles.guideBtn, backgroundColor: "#10B981", flex: 1, cursor: "pointer"}}
-              onClick={() => askAI("이 작품/상점에 대해 더 자세히 알려줘", selectedArtwork.name)}
+              onClick={() => handleAskAI(selectedArtwork)}
             >
               🤖 AI 질문하기
             </button>

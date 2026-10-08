@@ -11,9 +11,9 @@ const engine = new WeightedCentroid({
   minDistance: 0.3,
   maxValidDistance: 13.5,
   minValidRssi: -95,
-  distanceEmaAlpha: 0.25,
+  distanceEmaAlpha: 0.35,
   maxDistanceJumpM: 3.0,
-  positionEmaAlpha: 0.3,
+  positionEmaAlpha: 0.45,
 });
 
 /**

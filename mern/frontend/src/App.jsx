@@ -1,12 +1,15 @@
 import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft, ArrowRight, Settings, Navigation, ChevronRight } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import MapSection from './MapSketch';
 import AdminBeaconsSection from './AdminBeacons';
 import AdminLogin, { getAdminToken } from './AdminLogin';
 import { useCongestion, getCongestionLevel, countNearExhibit, NEARBY_RADIUS_M, REFRESH_MS } from './congestion';
-import { API_BASE as SERVER_BASE_URL } from './config';
 
+// 접속한 주소를 기준으로 자동으로 서버 주소를 잡음
+const SERVER_BASE_URL = process.env.NODE_ENV === 'production'
+  ? window.location.origin
+  : `${window.location.protocol}//${window.location.hostname}:4000`;
 
 const CURRENT_MAP_ID = '6a4e268e4b23f93d45141083';
 
@@ -228,79 +231,51 @@ function ExhibitsSection() {
 }
 
 /* ── AI 도슨트 ── */
-function ChatSection({ scannerId }) {
-  const newId = () => globalThis.crypto?.randomUUID?.() || createMessageId('conversation');
-  const greeting = () => [{
-    id: 'greeting', sender: 'bot',
-    text: '안녕하세요! Guidant AI 도슨트입니다. 전시물이나 체험 방법에 대해 궁금한 점을 물어보세요.',
-  }];
-
-  const [conversationId, setConversationId] = useState(newId);
-  const [messages, setMessages] = useState(greeting);
+function ChatSection({ scannerId, mapId, pendingQuestion, onPendingHandled }) {
   const [chatMessage, setChatMessage] = useState('');
   const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [conversations, setConversations] = useState([]);
-  const [notice, setNotice] = useState('');
-  const busyRef = useRef(false);
-  const generationRef = useRef(0);
-  const bottomRef = useRef(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false); // ✅ 이력 로딩 완료 여부
+  const handledQuestionRef = useRef(null);
+  const messagesEndRef = useRef(null);                   // ✅ 같은 질문 중복 전송 방지
+  const [messages, setMessages] = useState([
+    { id: 'greeting', sender: 'bot', text: '안녕하세요! Guidant AI 도슨트입니다. 전시물이나 체험 방법에 대해 궁금한 점을 물어보세요.' }
+  ]);
 
-  const historyBase = `${SERVER_BASE_URL}/api/chat/conversations/${encodeURIComponent(scannerId)}`;
-  const historyUrl = id => `${historyBase}/${encodeURIComponent(id)}`;
-  const isLegacy = conversationId === 'legacy';
-  const inputDisabled = busy || isLegacy || !scannerId;
-  const buttonStyle = {
-    padding: '8px 10px', borderRadius: 9, border: `1px solid ${T.border}`,
-    background: T.card, color: T.navy, fontSize: 12,
-    cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.55 : 1,
-  };
-
-  async function readJson(res) {
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '요청 처리에 실패했습니다.');
-    return data;
-  }
-
-  function resetConversation() {
-    setConversationId(newId());
-    setMessages(greeting());
-    setChatMessage('');
-    setIsVoiceMode(false);
-    setShowHistory(false);
-    setNotice('');
-  }
-
-  // 화면 진입 시 과거 기록을 불러오지 않고 새로 시작
+  // 과거 대화 이력 로드
   useEffect(() => {
-    generationRef.current += 1;
-    busyRef.current = false;
-    setBusy(false);
-    resetConversation();
-    setConversations([]);
+    if (!scannerId) { setHistoryLoaded(true); return; }
+    let cancelled = false;
 
-    return () => {
-      generationRef.current += 1;
-      busyRef.current = false;
-    };
+    fetch(`${SERVER_BASE_URL}/api/chat/${encodeURIComponent(scannerId)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('대화 이력 요청 실패');
+        return res.json();
+      })
+      .then(history => {
+        if (cancelled || !Array.isArray(history)) return;
+        setMessages(prev => [
+          prev[0],
+          ...history.map((h, i) => ({
+            id: `history_${scannerId}_${i}`, sender: h.role === 'user' ? 'user' : 'bot', text: h.message, zone: h.zone,
+          }))
+        ]);
+      })
+      .catch(err => console.error('히스토리 로드 실패:', err))
+      .finally(() => { if (!cancelled) setHistoryLoaded(true); });
+
+    return () => { cancelled = true; };
   }, [scannerId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [messages]);
-
-  // 기존 위치 기반 선제 안내 유지
+  // AI 선제적 메시지 수신 (기존 그대로)
   useEffect(() => {
     if (!scannerId) return;
     const socket = io(SERVER_BASE_URL, { transports: ['websocket'] });
     const joinMap = () => socket.emit('join_map', { mapId: CURRENT_MAP_ID });
     const handler = payload => {
-      if (!payload || payload.scannerId !== scannerId || typeof payload.message !== 'string') return;
-      setMessages(prev => [...prev, {
-        id: createMessageId('proactive'), sender: 'bot',
-        text: payload.message, zone: payload.zone,
-      }]);
+      if (!payload || payload.scannerId !== scannerId) return;
+      setMessages(prev => [
+        ...prev, { id: createMessageId('proactive'), sender: 'bot', text: payload.message, zone: payload.zone },
+      ]);
     };
 
     socket.on('connect', joinMap);
@@ -312,212 +287,93 @@ function ChatSection({ scannerId }) {
     };
   }, [scannerId]);
 
-  // 중복 요청 방지 및 화면 종료 후 오래된 응답 무시
-  async function runTask(task) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setNotice('');
-    const generation = generationRef.current;
-    const isCurrent = () => generation === generationRef.current;
+  // ✅ extra: 지도에서 넘어온 targetName, zone 같은 추가 정보
+  const handleSend = async (textToSend, extra = {}) => {
+    const userText = (textToSend || chatMessage).trim();
+    if (!userText) return;
+
+    const userMsgId = createMessageId('user');
+    const loadId = createMessageId('bot');
+    setMessages(prev => [
+      ...prev,
+      { id: userMsgId, sender: 'user', text: userText },
+      { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' },
+    ]);
+    setChatMessage('');
 
     try {
-      await task(isCurrent);
-    } catch (err) {
-      if (isCurrent()) setNotice(err.message);
-    } finally {
-      if (isCurrent()) {
-        busyRef.current = false;
-        setBusy(false);
-      }
+      const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userText, scannerId, ...extra }),
+      });
+      if (!res.ok) throw new Error('채팅 요청 실패');
+      const data = await res.json();
+      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: data.reply || '응답을 받지 못했습니다.' } : m));
+    } catch {
+      setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: '서버와 연결이 원활하지 않습니다. 백엔드 서버 연결을 확인해 주세요.' } : m));
     }
-  }
+  };
 
-  function startNewConversation() {
-    if (!busyRef.current) resetConversation();
-  }
+  // ✅ 지도에서 넘어온 질문을 이력 로딩이 끝난 뒤 한 번만 자동 전송
+  useEffect(() => {
+    if (!pendingQuestion || !historyLoaded) return;
+    if (handledQuestionRef.current === pendingQuestion.id) return;
+    handledQuestionRef.current = pendingQuestion.id;
 
-  function loadConversations() {
-    return runTask(async isCurrent => {
-      const data = await readJson(await fetch(historyBase));
-      if (!isCurrent()) return;
-      setConversations(data);
-      setShowHistory(true);
+    handleSend(pendingQuestion.question, {
+      mapId,
+      targetName: pendingQuestion.targetName,
+      zone: pendingQuestion.zone,
     });
-  }
+    onPendingHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuestion, historyLoaded]);
 
-  function openConversation(id) {
-    return runTask(async isCurrent => {
-      const history = await readJson(await fetch(historyUrl(id)));
-      if (!isCurrent()) return;
-      setConversationId(id);
-      setMessages([...greeting(), ...history.map(h => ({
-        id: String(h._id), sender: h.role === 'user' ? 'user' : 'bot',
-        text: h.message, zone: h.zone,
-      }))]);
-      setChatMessage('');
-      setShowHistory(false);
-    });
-  }
+   useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages]);
 
-  function deleteConversation(id) {
-    if (busyRef.current) return;
-    if (!window.confirm('이 대화 기록을 실제로 삭제할까요?\n삭제한 기록은 복구할 수 없습니다.')) return;
-
-
-    return runTask(async isCurrent => {
-      await readJson(await fetch(historyUrl(id), { method: 'DELETE' }));
-      if (!isCurrent()) return;
-      setConversations(prev => prev.filter(item => item.conversationId !== id));
-      if (id === conversationId) {
-        setConversationId(newId());
-        setMessages(greeting());
-        setChatMessage('');
-        setIsVoiceMode(false);
-      }
-      setNotice('대화 기록을 삭제했습니다.');
-    });
-  }
-
-  function handleSend(textToSend) {
-    const userText = (typeof textToSend === 'string' ? textToSend : chatMessage).trim();
-    if (!userText || !scannerId || busyRef.current || isLegacy) return;
-
-    return runTask(async isCurrent => {
-      const loadId = createMessageId('loading');
-      setMessages(prev => [...prev,
-        { id: createMessageId('user'), sender: 'user', text: userText },
-        { id: loadId, sender: 'bot', text: 'Guidant가 생각 중입니다...' },
-      ]);
-      setChatMessage('');
-
-      try {
-        const data = await readJson(await fetch(`${SERVER_BASE_URL}/api/chat`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userText, scannerId, conversationId }),
-        }));
-        if (!isCurrent()) return;
-        setMessages(prev => prev.map(msg => msg.id === loadId
-          ? { ...msg, text: data.reply || '응답을 받지 못했습니다.', zone: data.zone }
-          : msg));
-      } catch (err) {
-        if (!isCurrent()) return;
-        setMessages(prev => prev.map(msg => msg.id === loadId
-          ? { ...msg, text: `응답을 받지 못했습니다. ${err.message}` }
-          : msg));
-      }
-    });
-  }
+  /* ↓ return (...) 부분은 기존 코드 그대로 */
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      height: 'calc(100dvh - 70px)', minHeight: 350, background: T.bg,
-    }}>
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8, padding: '12px 16px',
-        borderBottom: `1px solid ${T.border}`, background: T.card,
-      }}>
-        <button type="button" disabled={busy} onClick={startNewConversation} style={buttonStyle}>새 대화</button>
-        <button type="button" disabled={busy}
-          onClick={showHistory ? () => setShowHistory(false) : loadConversations} style={buttonStyle}>
-          {showHistory ? '기록 닫기' : '기록 보기'}
-        </button>
-        <button type="button" disabled={busy} onClick={() => deleteConversation(conversationId)}
-          style={{ ...buttonStyle, color: '#B54848' }}>현재 대화 삭제</button>
-      </div>
-
-      {notice && <div role="status" style={{
-        padding: '10px 16px', fontSize: 12, color: T.sub, background: '#FFF4E3',
-      }}>{notice}</div>}
-
-      {showHistory && (
-        <div style={{
-          flexShrink: 0, maxHeight: '35%', overflowY: 'auto',
-          padding: '12px 16px', borderBottom: `1px solid ${T.border}`,
-        }}>
-          <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 750, color: T.text }}>보관된 대화</div>
-          {conversations.length === 0 && <div style={{ fontSize: 12, color: T.sub }}>보관된 대화가 없습니다.</div>}
-          {conversations.map(item => (
-            <div key={item.conversationId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <button type="button" disabled={busy} onClick={() => openConversation(item.conversationId)}
-                style={{ ...buttonStyle, flex: 1, minWidth: 0, textAlign: 'left' }}>
-                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {item.conversationId === 'legacy' ? '이전 기록' : item.title}
-                </div>
-                <div style={{ marginTop: 5, fontSize: 10, color: T.sub }}>
-                  {new Date(item.updatedAt).toLocaleString('ko-KR')} · 메시지 {item.messageCount}개
-                </div>
-              </button>
-              <button type="button" disabled={busy} onClick={() => deleteConversation(item.conversationId)}
-                style={{ ...buttonStyle, color: '#B54848', flexShrink: 0 }}>삭제</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{
-        flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px',
-        display: 'flex', flexDirection: 'column', gap: 16,
-      }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 70px)', minHeight: 350, background: T.bg }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {messages.map(msg => {
           const isUser = msg.sender === 'user';
           return (
-            <div key={msg.id} style={{
-              display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start',
-            }}>
-              {!isUser && <div style={{
-                display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6,
-                paddingLeft: 3, color: T.sub, fontSize: 10, fontWeight: 700,
-              }}><MessageSquare size={11} />Guidant</div>}
+            <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+              {!isUser && <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6, paddingLeft: 3, color: T.sub, fontSize: 10, fontWeight: 700 }}><MessageSquare size={11} />Guidant</div>}
               <div style={{
-                maxWidth: '84%', boxSizing: 'border-box', padding: '13px 15px',
-                borderRadius: 16, fontSize: 13, lineHeight: 1.75,
-                whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                maxWidth: '84%', boxSizing: 'border-box', padding: '13px 15px', borderRadius: 16,
+                fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
                 ...(isUser
                   ? { background: T.navy, color: '#FFFFFF', borderTopRightRadius: 5 }
-                  : { background: T.card, color: T.text, borderTopLeftRadius: 5,
-                      border: `1px solid ${T.border}`, boxShadow: T.shadow }),
-              }}>{msg.text}</div>
-              {msg.id === 'greeting' && !isVoiceMode && !isLegacy && (
+                  : { background: T.card, color: T.text, borderTopLeftRadius: 5, border: `1px solid ${T.border}`, boxShadow: T.shadow }),
+              }}>
+                {msg.text}
+              </div>
+              {msg.id === 'greeting' && !isVoiceMode && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 10 }}>
                   {['이 전시물은 뭔가요?', '체험 방법 알려줘'].map(chip => (
-                    <button type="button" key={chip} disabled={inputDisabled}
-                      onClick={() => handleSend(chip)} style={buttonStyle}>{chip}</button>
+                    <button type="button" key={chip} onClick={() => handleSend(chip)} style={{ padding: '8px 11px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 20, fontSize: 11, color: T.navy, cursor: 'pointer' }}>{chip}</button>
                   ))}
                 </div>
               )}
             </div>
           );
         })}
-        <div ref={bottomRef} />
+        <div ref={messagesEndRef} />
       </div>
-
-      <div style={{
-        flexShrink: 0, background: T.card, borderTop: `1px solid ${T.border}`,
-        padding: '14px 16px max(18px, env(safe-area-inset-bottom))',
-      }}>
-        {isLegacy && <div style={{ marginBottom: 10, fontSize: 11, color: T.sub, lineHeight: 1.6 }}>
-          이전 기록은 조회·삭제만 가능합니다. 질문하려면 '새 대화'를 눌러주세요.
-        </div>}
+      <div style={{ flexShrink: 0, background: T.card, borderTop: `1px solid ${T.border}`, padding: '14px 16px max(18px, env(safe-area-inset-bottom))' }}>
         {isVoiceMode && (
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12,
-            padding: '11px 12px', background: T.inputBg, borderRadius: 10, color: T.sub, fontSize: 11,
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, padding: '11px 12px', background: '#F1F4F8', borderRadius: 10, color: T.sub, fontSize: 11 }}>
             <span>음성 입력 기능은 준비 중입니다.</span>
-            <button type="button" onClick={() => setIsVoiceMode(false)}
-              style={{ border: 'none', background: 'transparent', color: T.navy, cursor: 'pointer' }}>닫기</button>
+            <button type="button" onClick={() => setIsVoiceMode(false)} style={{ border: 'none', background: 'transparent', color: T.navy, fontSize: 11, fontWeight: 750, cursor: 'pointer', flexShrink: 0 }}>닫기</button>
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            flex: 1, minWidth: 0, background: T.inputBg, borderRadius: 12,
-            padding: '12px 13px', border: `1px solid ${T.border}`,
-          }}>
-            <input type="text" aria-label="AI 도슨트에게 메시지 입력" value={chatMessage}
-              disabled={inputDisabled} maxLength={4000}
-              placeholder={isLegacy ? '새 대화를 시작해 주세요' : busy ? '처리 중입니다...' : '궁금한 내용을 입력하세요'}
+          <div style={{ flex: 1, minWidth: 0, background: T.inputBg, borderRadius: 12, padding: '12px 13px', border: `1px solid ${T.border}` }}>
+            <input type="text" aria-label="AI 도슨트에게 메시지 입력" placeholder="궁금한 내용을 입력하세요" value={chatMessage}
               onChange={e => setChatMessage(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
@@ -525,25 +381,15 @@ function ChatSection({ scannerId }) {
                   handleSend();
                 }
               }}
-              style={{
-                width: '100%', minWidth: 0, background: 'transparent', border: 'none',
-                outline: 'none', fontSize: 13, color: T.text, padding: 0, fontFamily: 'inherit',
-              }}
+              style={{ width: '100%', minWidth: 0, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: T.text, padding: 0, fontFamily: 'inherit' }}
             />
           </div>
-          <button type="button" aria-label="메시지 보내기" disabled={inputDisabled}
-            onClick={() => handleSend()} style={{
-              width: 42, height: 42, borderRadius: 12, background: T.navy, color: '#FFFFFF',
-              border: 'none', cursor: inputDisabled ? 'not-allowed' : 'pointer',
-              opacity: inputDisabled ? 0.5 : 1, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', flexShrink: 0,
-            }}><ArrowRight size={20} /></button>
-          <button type="button" aria-label="음성 입력 안내" onClick={() => setIsVoiceMode(prev => !prev)}
-            style={{
-              width: 38, height: 42, borderRadius: 12, background: T.inputBg,
-              border: `1px solid ${T.border}`, cursor: 'pointer', display: 'flex',
-              alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}><Mic size={17} color={T.sub} /></button>
+          <button type="button" aria-label="메시지 보내기" onClick={() => handleSend()} style={{ width: 42, height: 42, borderRadius: 12, background: T.navy, color: '#FFFFFF', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ArrowRight size={20} />
+          </button>
+          <button type="button" aria-label="음성 입력 안내" onClick={() => setIsVoiceMode(prev => !prev)} style={{ width: 38, height: 42, borderRadius: 12, background: T.inputBg, border: `1px solid ${T.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Mic size={17} color={T.sub} />
+          </button>
         </div>
       </div>
     </div>
@@ -608,6 +454,23 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [scannerId, setScannerId] = useState(() => getOrCreateWebScannerId());
 
+  const [pendingQuestion, setPendingQuestion] = useState(null);
+
+  const handleAskAI = useCallback(({ question, targetName, zone }) => {
+    setPendingQuestion({ id: createMessageId('ask'), question, targetName, zone });
+    setActivePage('chat');
+  }, []);
+
+  const handlePendingHandled = useCallback(() => setPendingQuestion(null), []);
+
+  // 페이지별로 필요한 props만 전달
+  const sectionProps = {
+    scannerId,
+    mapId: CURRENT_MAP_ID,
+    ...(activePage === 'map' && { onAskAI: handleAskAI }),
+    ...(activePage === 'chat' && { pendingQuestion, onPendingHandled: handlePendingHandled }),
+  };
+
   // 안드로이드 앱에서 전달한 sid 동기화
   useEffect(() => {
     const urlSid = new URLSearchParams(window.location.search).get('sid');
@@ -633,7 +496,7 @@ export default function App() {
         <main style={{ width: '100%', margin: '0 auto', flex: 1, minWidth: 0, overflowY: activePage === 'map' ? 'auto' : 'visible' }}>
           {activePage === null
             ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
-            : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
+                : ActiveSection ? <ActiveSection {...sectionProps} /> : null}
         </main>
       </div>
     </div>

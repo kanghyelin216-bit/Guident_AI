@@ -11,43 +11,6 @@ import { checkProactiveTrigger } from "../services/proactiveTrigger.js";
 
 const router = Router();
 
-/* ── 전송량 절약용 상태 (Render 무료 대역폭, Atlas 작업 수 절약) ── */
-const LOCATION_MIN_MOVE_M = 0.15;      // 이 거리 미만으로 움직이면 위치 전송 생략
-const LOCATION_HEARTBEAT_MS = 3000;    // 움직임이 없어도 최소 이 간격으로는 전송 (화면은 15초 무신호 시 제거)
-const CONGESTION_CACHE_MS = 1000;      // 혼잡도 계산 결과 재사용 시간
-const lastLocationSent = new Map();    // scannerId -> { x, y, zone, ts }
-const congestionCache = new Map();     // mapId -> { data, json, ts }
-
-function shouldSendLocation(scannerId, result) {
-  const now = Date.now();
-  const last = lastLocationSent.get(scannerId);
-  if (
-    last &&
-    now - last.ts < LOCATION_HEARTBEAT_MS &&
-    last.zone === result.zone &&
-    Math.hypot(result.x - last.x, result.y - last.y) < LOCATION_MIN_MOVE_M
-  ) return false;
-  lastLocationSent.set(scannerId, { x: result.x, y: result.y, zone: result.zone, ts: now });
-  return true;
-}
-
-async function getCongestionCached(mapId) {
-  const now = Date.now();
-  const hit = congestionCache.get(mapId);
-  if (hit && now - hit.ts < CONGESTION_CACHE_MS) return { congestion: hit.data, changed: false };
-  const data = await getCongestionForMap(mapId);
-  const json = JSON.stringify(data);
-  const changed = !hit || hit.json !== json;
-  congestionCache.set(mapId, { data, json, ts: now });
-  return { congestion: data, changed };
-}
-
-// 오래된 상태 정리 (메모리 누수 방지)
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, v] of lastLocationSent) if (now - v.ts > 60000) lastLocationSent.delete(id);
-}, 30000).unref();
-
 /**
  * 💡 최근 15초 동안 신호를 보낸 "서로 다른 휴대폰 수"를 구역별로 집계
  */
@@ -155,22 +118,29 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // 4. ⚡ 실시간 위치 전파 (지도 방 참가자에게만, 움직임이 있을 때만)
+    // 4. ⚡ [최우선 처리] Socket.io 실시간 위치 전파 (대기시간 0ms 지향)
     const io = req.app.get("io");
-    if (io && shouldSendLocation(String(scannerId), result)) {
-      io.to(mapId).emit("location_update", {
+    if (io) {
+      const payload = {
         scannerId,
-        x: Math.round(result.x * 100) / 100,
-        y: Math.round(result.y * 100) / 100,
+        mapId,
+        x: result.x,
+        y: result.y,
         zone: result.zone,
-      });
+        confidence: result.confidence,
+        usedBeacons: result.usedBeacons,
+      };
+
+      // Room 단절 대비: mapId Room과 전역 io에 모두 즉시 발송
+      io.to(mapId).emit("location_update", payload);
+      io.emit("location_update", payload);
     }
 
     // 🎯 [개선 반영] 서버 터미널 디버그 출력 (어떤 비콘이 쓰였고 신뢰도가 얼마인지 상세 표기)
     console.log("🎯 [계산된 위치]", result.x, result.y, result.zone, "| 사용된 비콘:", result.usedBeacons, "| 신뢰도:", result.confidence);
 
     // 5. ⚡ [즉시 응답] 안드로이드 앱으로 HTTP OK 응답 반환하여 Network Latency 최소화
-    res.json({ status: "ok" });
+    res.json({ status: "ok", scannerId, location: result });
 
     // 6. 🟢 [Non-blocking 백그라운드 처리] DB 적재 및 무거운 혼잡도 연산은 응답 후 비동기 처리
     setImmediate(async () => {
@@ -212,8 +182,9 @@ router.post("/", async (req, res) => {
       // (3) 혼잡도 재계산 및 발송
       if (io) {
         try {
-          const { congestion, changed } = await getCongestionCached(mapId);
-          if (changed) io.emit("congestion_update", { mapId, congestion });
+          const congestion = await getCongestionForMap(mapId);
+          io.to(mapId).emit("congestion_update", { mapId, congestion });
+          io.emit("congestion_update", { mapId, congestion });
           
           // AI 선제적 트리거 체크 (비동기, 응답 지연에 영향 없음)
           const isCongested = (congestion[result.zone] || 0) >= 2; 
@@ -240,7 +211,7 @@ router.post("/", async (req, res) => {
 // GET /api/location/congestion/:mapId
 router.get("/congestion/:mapId", async (req, res) => {
   try {
-    const { congestion } = await getCongestionCached(req.params.mapId);
+    const congestion = await getCongestionForMap(req.params.mapId);
     res.json({ congestion });
   } catch (error) {
     res.status(500).json({ error: error.message });
