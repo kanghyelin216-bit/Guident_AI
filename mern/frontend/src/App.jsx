@@ -1,5 +1,5 @@
 import { MapPin, Search, MessageSquare, Mic, TrendingUp, ArrowLeft, ArrowRight, Settings, Navigation, ChevronRight } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import MapSection from './MapSketch';
 import AdminBeaconsSection from './AdminBeacons';
@@ -231,16 +231,19 @@ function ExhibitsSection() {
 }
 
 /* ── AI 도슨트 ── */
-function ChatSection({ scannerId }) {
+function ChatSection({ scannerId, mapId, pendingQuestion, onPendingHandled }) {
   const [chatMessage, setChatMessage] = useState('');
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false); // ✅ 이력 로딩 완료 여부
+  const handledQuestionRef = useRef(null);
+  const messagesEndRef = useRef(null);                   // ✅ 같은 질문 중복 전송 방지
   const [messages, setMessages] = useState([
     { id: 'greeting', sender: 'bot', text: '안녕하세요! Guidant AI 도슨트입니다. 전시물이나 체험 방법에 대해 궁금한 점을 물어보세요.' }
   ]);
 
   // 과거 대화 이력 로드
   useEffect(() => {
-    if (!scannerId) return;
+    if (!scannerId) { setHistoryLoaded(true); return; }
     let cancelled = false;
 
     fetch(`${SERVER_BASE_URL}/api/chat/${encodeURIComponent(scannerId)}`)
@@ -257,12 +260,13 @@ function ChatSection({ scannerId }) {
           }))
         ]);
       })
-      .catch(err => console.error('히스토리 로드 실패:', err));
+      .catch(err => console.error('히스토리 로드 실패:', err))
+      .finally(() => { if (!cancelled) setHistoryLoaded(true); });
 
     return () => { cancelled = true; };
   }, [scannerId]);
 
-  // AI 선제적 메시지 수신
+  // AI 선제적 메시지 수신 (기존 그대로)
   useEffect(() => {
     if (!scannerId) return;
     const socket = io(SERVER_BASE_URL, { transports: ['websocket'] });
@@ -283,7 +287,8 @@ function ChatSection({ scannerId }) {
     };
   }, [scannerId]);
 
-  const handleSend = async textToSend => {
+  // ✅ extra: 지도에서 넘어온 targetName, zone 같은 추가 정보
+  const handleSend = async (textToSend, extra = {}) => {
     const userText = (textToSend || chatMessage).trim();
     if (!userText) return;
 
@@ -299,7 +304,7 @@ function ChatSection({ scannerId }) {
     try {
       const res = await fetch(`${SERVER_BASE_URL}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, scannerId }),
+        body: JSON.stringify({ message: userText, scannerId, ...extra }),
       });
       if (!res.ok) throw new Error('채팅 요청 실패');
       const data = await res.json();
@@ -308,6 +313,27 @@ function ChatSection({ scannerId }) {
       setMessages(prev => prev.map(m => m.id === loadId ? { ...m, text: '서버와 연결이 원활하지 않습니다. 백엔드 서버 연결을 확인해 주세요.' } : m));
     }
   };
+
+  // ✅ 지도에서 넘어온 질문을 이력 로딩이 끝난 뒤 한 번만 자동 전송
+  useEffect(() => {
+    if (!pendingQuestion || !historyLoaded) return;
+    if (handledQuestionRef.current === pendingQuestion.id) return;
+    handledQuestionRef.current = pendingQuestion.id;
+
+    handleSend(pendingQuestion.question, {
+      mapId,
+      targetName: pendingQuestion.targetName,
+      zone: pendingQuestion.zone,
+    });
+    onPendingHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuestion, historyLoaded]);
+
+   useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages]);
+
+  /* ↓ return (...) 부분은 기존 코드 그대로 */
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 70px)', minHeight: 350, background: T.bg }}>
@@ -336,6 +362,7 @@ function ChatSection({ scannerId }) {
             </div>
           );
         })}
+        <div ref={messagesEndRef} />
       </div>
       <div style={{ flexShrink: 0, background: T.card, borderTop: `1px solid ${T.border}`, padding: '14px 16px max(18px, env(safe-area-inset-bottom))' }}>
         {isVoiceMode && (
@@ -427,6 +454,23 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [scannerId, setScannerId] = useState(() => getOrCreateWebScannerId());
 
+  const [pendingQuestion, setPendingQuestion] = useState(null);
+
+  const handleAskAI = useCallback(({ question, targetName, zone }) => {
+    setPendingQuestion({ id: createMessageId('ask'), question, targetName, zone });
+    setActivePage('chat');
+  }, []);
+
+  const handlePendingHandled = useCallback(() => setPendingQuestion(null), []);
+
+  // 페이지별로 필요한 props만 전달
+  const sectionProps = {
+    scannerId,
+    mapId: CURRENT_MAP_ID,
+    ...(activePage === 'map' && { onAskAI: handleAskAI }),
+    ...(activePage === 'chat' && { pendingQuestion, onPendingHandled: handlePendingHandled }),
+  };
+
   // 안드로이드 앱에서 전달한 sid 동기화
   useEffect(() => {
     const urlSid = new URLSearchParams(window.location.search).get('sid');
@@ -452,7 +496,7 @@ export default function App() {
         <main style={{ width: '100%', margin: '0 auto', flex: 1, minWidth: 0, overflowY: activePage === 'map' ? 'auto' : 'visible' }}>
           {activePage === null
             ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
-            : ActiveSection ? <ActiveSection scannerId={scannerId} mapId={CURRENT_MAP_ID} /> : null}
+                : ActiveSection ? <ActiveSection {...sectionProps} /> : null}
         </main>
       </div>
     </div>
