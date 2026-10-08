@@ -14,7 +14,8 @@ if (typeof window !== 'undefined') {
   window.p5 = p5; 
   p5.disableFriendlyErrors = true;
 }
-
+import { API_BASE } from "./config";
+const SERVER_BASE_URL = API_BASE;
 /* ==========================================================================
    📐 캔버스 규격 및 백엔드 서버 설정 (1미터 = 1격자칸 = 75픽셀 규격)
    ========================================================================== */
@@ -29,9 +30,7 @@ const BASE_HEIGHT = GRID_ROWS * PIXEL_SCALE;  // 750px
 // 🔵 테스트용 임의의 내 위치 (4m, 8m 지점 -> x: 300px, y: 600px)
 const DEFAULT_MOCK_USER_POS = { x: 300, y: 600 };
 
-const SERVER_BASE_URL = typeof window !== 'undefined'
-  ? `${window.location.protocol}//${window.location.hostname}:4000`
-  : 'http://localhost:4000';
+
 
 function metersToPixels(xM, yM) {
   const px = xM * PIXEL_SCALE;
