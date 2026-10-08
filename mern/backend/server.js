@@ -25,11 +25,9 @@
 import "dotenv/config";
 import dns from "dns";
 
-// 로컬(학교/카페 Wi-Fi)에서는 공용 DNS 강제 — Atlas SRV 조회 차단 우회
-// Render 등 배포 환경에서는 컨테이너 내부 DNS를 그대로 사용해야 함
-if (!process.env.RENDER) {
-  dns.setServers(["8.8.8.8", "1.1.1.1"]);
-}
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+
+console.log("🌐 Node DNS:", dns.getServers());
 
 import express from "express";
 import cors from "cors";
