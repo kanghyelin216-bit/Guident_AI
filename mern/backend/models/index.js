@@ -49,3 +49,4 @@ const ScannerReadingSchema = new mongoose.Schema({
 
 // 5분 후 자동 삭제 (TTL 인덱스): 인덱스 옵션으로 지정해야 적용됩니다
 ScannerReadingSchema.index({ ts: 1 }, { expireAfterSeconds: 300 });
+export const ScannerReading = mongoose.model("ScannerReading", ScannerReadingSchema);
