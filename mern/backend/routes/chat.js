@@ -3,7 +3,7 @@ import Groq from "groq-sdk";
 import { ChatHistory, ScannerReading } from "../models/index.js";
 import fs from "fs/promises";
 import path from "path";
-import { fileURLtoPath } from "url";
+import { fileURLToPath } from "url";
 
 
 const router = Router();
