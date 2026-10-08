@@ -455,9 +455,11 @@ export default function App() {
   const [scannerId, setScannerId] = useState(() => getOrCreateWebScannerId());
 
   const [pendingQuestion, setPendingQuestion] = useState(null);
+   const [returnPage, setReturnPage] = useState(null); // 도슨트에서 뒤로 갈 페이지
 
   const handleAskAI = useCallback(({ question, targetName, zone }) => {
     setPendingQuestion({ id: createMessageId('ask'), question, targetName, zone });
+    setReturnPage('map');
     setActivePage('chat');
   }, []);
 
@@ -492,7 +494,19 @@ export default function App() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
     }}>
       <div style={{ width: '100%', maxWidth: activePage === 'map' ? 'none' : 480, display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-        <Header activePage={activePage} onBack={() => setActivePage(null)} paired={paired} allMenuItems={menuItems} />
+      <Header
+        activePage={activePage}
+        onBack={() => {
+          if (activePage === 'chat' && returnPage) {
+            setActivePage(returnPage);
+            setReturnPage(null);
+          } else {
+            setActivePage(null);
+          }
+        }}
+        paired={paired}
+        allMenuItems={menuItems}
+      />
         <main style={{ width: '100%', margin: '0 auto', flex: 1, minWidth: 0, overflowY: activePage === 'map' ? 'auto' : 'visible' }}>
           {activePage === null
             ? <HomeMenu items={menuItems} onNavigate={setActivePage} paired={paired} />
